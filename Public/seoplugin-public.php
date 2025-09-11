@@ -39,6 +39,12 @@ class SEOPlugin_Public {
 
     // Add meta tags to head
     public function add_meta_tags() {
+        // Add webmaster verification tags
+        $this->add_webmaster_verification_tags();
+        
+        // Add analytics tracking
+        $this->add_analytics_tracking();
+        
         if ( is_singular() ) {
             global $post;
             $title = get_post_meta($post->ID, '_seoplugin_meta_title', true) ?: get_the_title($post->ID);
@@ -112,11 +118,160 @@ class SEOPlugin_Public {
             echo '<meta name="article:published_time" content="' . esc_attr(get_the_date('c', $post->ID)) . '">' . "\n";
             echo '<meta name="article:modified_time" content="' . esc_attr(get_the_modified_date('c', $post->ID)) . '">' . "\n";
             echo '<meta name="article:author" content="' . esc_attr(get_the_author_meta('display_name', $post->post_author)) . '">' . "\n";
+        } elseif (is_front_page()) {
+            // Homepage specific meta tags
+            $homepage_title = get_option('seoplugin_homepage_title', get_bloginfo('name'));
+            $homepage_description = get_option('seoplugin_homepage_description', get_bloginfo('description'));
+            $default_og_image = get_option('seoplugin_default_og_image');
+            
+            echo '<!-- This site is optimized with the SEOPlugin -->' . "\n";
+            echo '<meta name="description" content="' . esc_attr($homepage_description) . '">' . "\n";
+            
+            // Open Graph tags for homepage
+            echo '<meta property="og:title" content="' . esc_attr($homepage_title) . '">' . "\n";
+            echo '<meta property="og:description" content="' . esc_attr($homepage_description) . '">' . "\n";
+            echo '<meta property="og:url" content="' . esc_url(home_url('/')) . '">' . "\n";
+            echo '<meta property="og:type" content="website">' . "\n";
+            echo '<meta property="og:site_name" content="' . esc_attr(get_bloginfo('name')) . '">' . "\n";
+            
+            if ($default_og_image) {
+                $og_image_url = wp_get_attachment_image_url($default_og_image, 'full');
+                if ($og_image_url) {
+                    echo '<meta property="og:image" content="' . esc_url($og_image_url) . '">' . "\n";
+                }
+            }
+            
+            // Twitter Card tags for homepage
+            echo '<meta name="twitter:card" content="summary_large_image">' . "\n";
+            echo '<meta name="twitter:title" content="' . esc_attr($homepage_title) . '">' . "\n";
+            echo '<meta name="twitter:description" content="' . esc_attr($homepage_description) . '">' . "\n";
+            
+            $twitter_username = get_option('seoplugin_twitter_username');
+            if ($twitter_username) {
+                echo '<meta name="twitter:site" content="' . esc_attr($twitter_username) . '">' . "\n";
+            }
+        } elseif (is_category() || is_tag() || is_archive()) {
+            // Archive pages meta tags
+            $this->add_archive_meta_tags();
+        }
+        
+        // Add Facebook App ID if set
+        $facebook_app_id = get_option('seoplugin_facebook_app_id');
+        if ($facebook_app_id) {
+            echo '<meta property="fb:app_id" content="' . esc_attr($facebook_app_id) . '">' . "\n";
+        }
+    }
+
+    // Add webmaster verification tags
+    private function add_webmaster_verification_tags() {
+        $google_verification = get_option('seoplugin_google_verification');
+        $bing_verification = get_option('seoplugin_bing_verification');
+        $yandex_verification = get_option('seoplugin_yandex_verification');
+        $pinterest_verification = get_option('seoplugin_pinterest_verification');
+        
+        if ($google_verification) {
+            echo '<meta name="google-site-verification" content="' . esc_attr($google_verification) . '">' . "\n";
+        }
+        
+        if ($bing_verification) {
+            echo '<meta name="msvalidate.01" content="' . esc_attr($bing_verification) . '">' . "\n";
+        }
+        
+        if ($yandex_verification) {
+            echo '<meta name="yandex-verification" content="' . esc_attr($yandex_verification) . '">' . "\n";
+        }
+        
+        if ($pinterest_verification) {
+            echo '<meta name="p:domain_verify" content="' . esc_attr($pinterest_verification) . '">' . "\n";
+        }
+    }
+
+    // Add analytics tracking
+    private function add_analytics_tracking() {
+        $google_analytics = get_option('seoplugin_google_analytics');
+        $google_tag_manager = get_option('seoplugin_google_tag_manager');
+        
+        if ($google_tag_manager) {
+            ?>
+            <!-- Google Tag Manager -->
+            <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+            new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+            j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+            'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+            })(window,document,'script','dataLayer','<?php echo esc_js($google_tag_manager); ?>');</script>
+            <!-- End Google Tag Manager -->
+            <?php
+        } elseif ($google_analytics) {
+            if (strpos($google_analytics, 'G-') === 0) {
+                // GA4 tracking
+                ?>
+                <!-- Global site tag (gtag.js) - Google Analytics -->
+                <script async src="https://www.googletagmanager.com/gtag/js?id=<?php echo esc_attr($google_analytics); ?>"></script>
+                <script>
+                  window.dataLayer = window.dataLayer || [];
+                  function gtag(){dataLayer.push(arguments);}
+                  gtag('js', new Date());
+                  gtag('config', '<?php echo esc_js($google_analytics); ?>');
+                </script>
+                <?php
+            } else {
+                // Universal Analytics
+                ?>
+                <!-- Google Analytics -->
+                <script>
+                (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+                (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+                m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+                })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+                ga('create', '<?php echo esc_js($google_analytics); ?>', 'auto');
+                ga('send', 'pageview');
+                </script>
+                <?php
+            }
+        }
+    }
+
+    // Add archive meta tags
+    private function add_archive_meta_tags() {
+        $noindex_categories = get_option('seoplugin_noindex_categories', false);
+        $noindex_tags = get_option('seoplugin_noindex_tags', false);
+        $noindex_archives = get_option('seoplugin_noindex_archives', false);
+        
+        $should_noindex = false;
+        
+        if (is_category() && $noindex_categories) {
+            $should_noindex = true;
+        } elseif (is_tag() && $noindex_tags) {
+            $should_noindex = true;
+        } elseif ((is_date() || is_author()) && $noindex_archives) {
+            $should_noindex = true;
+        }
+        
+        if ($should_noindex) {
+            echo '<meta name="robots" content="noindex,follow">' . "\n";
+        }
+        
+        // Add archive-specific meta description
+        if (is_category()) {
+            $description = category_description();
+            if ($description) {
+                echo '<meta name="description" content="' . esc_attr(strip_tags($description)) . '">' . "\n";
+            }
+        } elseif (is_tag()) {
+            $description = tag_description();
+            if ($description) {
+                echo '<meta name="description" content="' . esc_attr(strip_tags($description)) . '">' . "\n";
+            }
         }
     }
 
     // Register sitemap rewrite rule
     public function register_sitemap() {
+        // Only register if XML sitemap is enabled
+        if (!get_option('seoplugin_xml_sitemap_enabled', true)) {
+            return;
+        }
+        
         add_rewrite_rule(
             'sitemap\.xml$',
             'index.php?seoplugin_sitemap=1',
@@ -223,7 +378,19 @@ class SEOPlugin_Public {
             if (!empty($custom_title)) {
                 $title['title'] = $custom_title;
             }
+        } elseif (is_front_page()) {
+            $homepage_title = get_option('seoplugin_homepage_title');
+            if (!empty($homepage_title)) {
+                $title['title'] = $homepage_title;
+            }
         }
+        
+        // Add separator
+        $separator = get_option('seoplugin_separator', '|');
+        if (isset($title['title']) && isset($title['site'])) {
+            $title['sep'] = $separator;
+        }
+        
         return $title;
     }
 
@@ -372,6 +539,11 @@ class SEOPlugin_Public {
 
     // Breadcrumbs shortcode
     public function breadcrumbs_shortcode($atts) {
+        // Check if breadcrumbs are enabled
+        if (!get_option('seoplugin_breadcrumbs_enabled', true)) {
+            return '';
+        }
+        
         $atts = shortcode_atts([
             'separator' => ' > ',
             'home_text' => 'Home',
