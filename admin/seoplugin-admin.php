@@ -66,6 +66,30 @@ class SEOPlugin_Admin {
             'sanitize_callback' => 'sanitize_text_field',
         ] );
 
+        register_setting( 'seoplugin_social_group', 'seoplugin_x_username', [
+            'sanitize_callback' => 'sanitize_text_field',
+        ] );
+
+        register_setting( 'seoplugin_social_group', 'seoplugin_x_card_type', [
+            'sanitize_callback' => 'sanitize_text_field',
+        ] );
+
+        register_setting( 'seoplugin_social_group', 'seoplugin_linkedin_company_id', [
+            'sanitize_callback' => 'sanitize_text_field',
+        ] );
+
+        register_setting( 'seoplugin_social_group', 'seoplugin_instagram_username', [
+            'sanitize_callback' => 'sanitize_text_field',
+        ] );
+
+        register_setting( 'seoplugin_social_group', 'seoplugin_youtube_channel', [
+            'sanitize_callback' => 'esc_url_raw',
+        ] );
+
+        register_setting( 'seoplugin_social_group', 'seoplugin_tiktok_username', [
+            'sanitize_callback' => 'sanitize_text_field',
+        ] );
+
         register_setting( 'seoplugin_social_group', 'seoplugin_default_og_image', [
             'sanitize_callback' => 'absint',
         ] );
@@ -186,9 +210,49 @@ class SEOPlugin_Admin {
         );
 
         add_settings_field(
-            'seoplugin_twitter_username',
-            __( 'Twitter Username', 'seoplugin' ),
-            [ $this, 'render_twitter_username_field' ],
+            'seoplugin_x_username',
+            __( 'X (Twitter) Username', 'seoplugin' ),
+            [ $this, 'render_x_username_field' ],
+            'seoplugin-social',
+            'seoplugin_social_section'
+        );
+
+        add_settings_field(
+            'seoplugin_x_card_type',
+            __( 'X Card Type', 'seoplugin' ),
+            [ $this, 'render_x_card_type_field' ],
+            'seoplugin-social',
+            'seoplugin_social_section'
+        );
+
+        add_settings_field(
+            'seoplugin_linkedin_company_id',
+            __( 'LinkedIn Company ID', 'seoplugin' ),
+            [ $this, 'render_linkedin_company_id_field' ],
+            'seoplugin-social',
+            'seoplugin_social_section'
+        );
+
+        add_settings_field(
+            'seoplugin_instagram_username',
+            __( 'Instagram Username', 'seoplugin' ),
+            [ $this, 'render_instagram_username_field' ],
+            'seoplugin-social',
+            'seoplugin_social_section'
+        );
+
+        add_settings_field(
+            'seoplugin_youtube_channel',
+            __( 'YouTube Channel URL', 'seoplugin' ),
+            [ $this, 'render_youtube_channel_field' ],
+            'seoplugin-social',
+            'seoplugin_social_section'
+        );
+
+        add_settings_field(
+            'seoplugin_tiktok_username',
+            __( 'TikTok Username', 'seoplugin' ),
+            [ $this, 'render_tiktok_username_field' ],
             'seoplugin-social',
             'seoplugin_social_section'
         );
@@ -517,7 +581,66 @@ class SEOPlugin_Admin {
         <?php
     }
 
-    // Twitter username field
+    // X (Twitter) username field
+    public function render_x_username_field() {
+        $setting = get_option( 'seoplugin_x_username', get_option('seoplugin_twitter_username') );
+        ?>
+        <input type="text" name="seoplugin_x_username" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" placeholder="@username" />
+        <p class="description"><?php esc_html_e( 'Your X (formerly Twitter) username for X Card attribution.', 'seoplugin' ); ?></p>
+        <?php
+    }
+
+    // X Card Type field
+    public function render_x_card_type_field() {
+        $setting = get_option( 'seoplugin_x_card_type', 'summary_large_image' );
+        ?>
+        <select name="seoplugin_x_card_type" class="regular-text">
+            <option value="summary_large_image" <?php selected($setting, 'summary_large_image'); ?>><?php _e('Large Image Summary', 'seoplugin'); ?></option>
+            <option value="summary" <?php selected($setting, 'summary'); ?>><?php _e('Summary', 'seoplugin'); ?></option>
+            <option value="app" <?php selected($setting, 'app'); ?>><?php _e('App', 'seoplugin'); ?></option>
+            <option value="player" <?php selected($setting, 'player'); ?>><?php _e('Player', 'seoplugin'); ?></option>
+        </select>
+        <p class="description"><?php esc_html_e( 'Choose the default X Card type for your content.', 'seoplugin' ); ?></p>
+        <?php
+    }
+
+    // LinkedIn Company ID field
+    public function render_linkedin_company_id_field() {
+        $setting = get_option( 'seoplugin_linkedin_company_id', '' );
+        ?>
+        <input type="text" name="seoplugin_linkedin_company_id" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" placeholder="1234567" />
+        <p class="description"><?php esc_html_e( 'Your LinkedIn Company ID for enhanced LinkedIn sharing.', 'seoplugin' ); ?></p>
+        <?php
+    }
+
+    // Instagram username field
+    public function render_instagram_username_field() {
+        $setting = get_option( 'seoplugin_instagram_username', '' );
+        ?>
+        <input type="text" name="seoplugin_instagram_username" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" placeholder="@username" />
+        <p class="description"><?php esc_html_e( 'Your Instagram username for social media integration.', 'seoplugin' ); ?></p>
+        <?php
+    }
+
+    // YouTube Channel URL field
+    public function render_youtube_channel_field() {
+        $setting = get_option( 'seoplugin_youtube_channel', '' );
+        ?>
+        <input type="url" name="seoplugin_youtube_channel" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" placeholder="https://www.youtube.com/channel/..." />
+        <p class="description"><?php esc_html_e( 'Your YouTube channel URL for social media integration.', 'seoplugin' ); ?></p>
+        <?php
+    }
+
+    // TikTok username field
+    public function render_tiktok_username_field() {
+        $setting = get_option( 'seoplugin_tiktok_username', '' );
+        ?>
+        <input type="text" name="seoplugin_tiktok_username" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" placeholder="@username" />
+        <p class="description"><?php esc_html_e( 'Your TikTok username for social media integration.', 'seoplugin' ); ?></p>
+        <?php
+    }
+
+    // Twitter username field (legacy)
     public function render_twitter_username_field() {
         $setting = get_option( 'seoplugin_twitter_username', '' );
         ?>
