@@ -417,10 +417,13 @@
     max-width: 500px;
 }
 
-.twitter-image {
+.x-card, .twitter-card {
+    max-width: 500px;
+}
+
+.x-image, .twitter-image {
     width: 100%;
     height: 200px;
-}
 
 
 /* AI SEO Assistant */

@@ -208,13 +208,13 @@ function updateSocialPreviews() {
     const ogImage = jQuery('#seoplugin_og_image_id').val();
     
     // Update all previews
-    jQuery('.social-title, .twitter-title').text(title);
-    jQuery('.social-description, .twitter-description').text(description);
+    jQuery('.social-title, .x-title, .twitter-title').text(title);
+    jQuery('.social-description, .x-description, .twitter-description').text(description);
     
     if (ogImage && ogImage !== '') {
         // Image will be updated when selected
     } else {
-        jQuery('.social-image img, .twitter-image img').hide();
+        jQuery('.social-image img, .x-image img, .twitter-image img').hide();
         jQuery('.no-image').show();
     }
 }

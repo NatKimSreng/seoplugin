@@ -514,6 +514,34 @@ class SEOPlugin_Public {
                     "sameAs" => [] // Optional: Add social links here
                 ]
             ];
+            
+            // Add social media links to organization schema
+            $social_links = [];
+            $x_username = get_option('seoplugin_x_username', get_option('seoplugin_twitter_username'));
+            $instagram_username = get_option('seoplugin_instagram_username');
+            $youtube_channel = get_option('seoplugin_youtube_channel');
+            $tiktok_username = get_option('seoplugin_tiktok_username');
+            
+            if ($x_username) {
+                $social_links[] = 'https://x.com/' . ltrim($x_username, '@');
+            }
+            if ($instagram_username) {
+                $social_links[] = 'https://www.instagram.com/' . ltrim($instagram_username, '@');
+            }
+            if ($youtube_channel) {
+                $social_links[] = $youtube_channel;
+            }
+            if ($tiktok_username) {
+                $social_links[] = 'https://www.tiktok.com/@' . ltrim($tiktok_username, '@');
+            }
+            
+            // Update organization schema with social links
+            foreach ($jsonld['@graph'] as &$item) {
+                if ($item['@type'] === 'Organization') {
+                    $item['sameAs'] = $social_links;
+                    break;
+                }
+            }
 
             $jsonld = [
                 "@context" => "https://schema.org",
