@@ -620,6 +620,104 @@
     padding-right: 32px;
 }
 
+/* Category/Term SEO Fields */
+.term-seo-wrap {
+    margin-bottom: 20px;
+}
+
+.term-seo-wrap label {
+    font-weight: 600;
+    color: #1d2327;
+    margin-bottom: 5px;
+    display: block;
+}
+
+.term-seo-wrap .frmtxt {
+    width: 100%;
+    max-width: 500px;
+}
+
+.term-seo-wrap textarea.frmtxt {
+    resize: vertical;
+    min-height: 80px;
+}
+
+.term-seo-wrap .description {
+    margin-top: 5px;
+    color: #646970;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.term-seo-wrap .google-view {
+    margin-top: 15px;
+    max-width: 600px;
+}
+
+/* Term edit form specific styles */
+.form-table .term-seo-wrap th {
+    width: 200px;
+    padding: 15px 10px 15px 0;
+    vertical-align: top;
+}
+
+.form-table .term-seo-wrap td {
+    padding: 15px 10px 15px 0;
+    vertical-align: top;
+}
+
+.form-table .term-seo-wrap .frmtxt {
+    width: 100%;
+    max-width: 500px;
+}
+
+/* Category add form styles */
+.form-field.term-seo-wrap {
+    padding: 15px 0;
+    border-bottom: 1px solid #e1e5e9;
+}
+
+.form-field.term-seo-wrap:last-child {
+    border-bottom: none;
+}
+
+.form-field.term-seo-wrap label {
+    font-weight: 600;
+    color: #1d2327;
+    margin-bottom: 8px;
+    display: block;
+}
+
+.form-field.term-seo-wrap input,
+.form-field.term-seo-wrap textarea,
+.form-field.term-seo-wrap select {
+    width: 100%;
+    max-width: 500px;
+}
+
+/* OG Image preview in terms */
+#seoplugin_og_image_preview {
+    margin: 10px 0;
+}
+
+#seoplugin_og_image_preview img {
+    border-radius: 4px;
+    border: 1px solid #dadce0;
+    box-shadow: 0 1px 3px rgba(60, 64, 67, 0.3);
+}
+
+#seoplugin_remove_og_image {
+    margin-left: 10px;
+    background: #dc3545;
+    color: white;
+    border-color: #dc3545;
+}
+
+#seoplugin_remove_og_image:hover {
+    background: #c82333;
+    border-color: #bd2130;
+}
+
 /* Improved spacing and layout */
 .seoplugin_eseo > div {
     margin-bottom: 25px;

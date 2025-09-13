@@ -554,6 +554,139 @@ class SEOPlugin_Public {
             echo '<!-- SEOPlugin -->' . "\n";
         }
     }
+    
+    // Add JSON-LD structured data for terms
+    public function add_term_jsonld_snippet( $term ) {
+        if ( ! $term ) {
+            return;
+        }
+        
+        $meta_title = get_term_meta( $term->term_id, '_seoplugin_meta_title', true );
+        $meta_description = get_term_meta( $term->term_id, '_seoplugin_meta_description', true );
+        $og_image_id = get_term_meta( $term->term_id, '_seoplugin_og_image_id', true );
+        
+        $title = $meta_title ?: $term->name;
+        $description = $meta_description ?: ( $term->description ?: 'Browse our ' . $term->name . ' content.' );
+        $url = get_term_link( $term );
+        
+        if ( is_wp_error( $url ) ) {
+            return;
+        }
+        
+        // Image data
+        $image_url = '';
+        $image_width = '';
+        $image_height = '';
+        if ( $og_image_id && is_numeric( $og_image_id ) ) {
+            $image_url = wp_get_attachment_image_url( $og_image_id, 'full' );
+            $meta = wp_get_attachment_metadata( $og_image_id );
+            $image_width = $meta['width'] ?? '';
+            $image_height = $meta['height'] ?? '';
+        }
+        
+        $site_name = get_bloginfo( 'name' );
+        $site_url = home_url( '/' );
+        $language = get_bloginfo( 'language' ) ?: 'en-US';
+        
+        $graph = [
+            [
+                "@type" => "CollectionPage",
+                "@id" => $url,
+                "url" => $url,
+                "name" => $title,
+                "isPartOf" => [ "@id" => "{$site_url}#website" ],
+                "description" => $description,
+                "breadcrumb" => [ "@id" => "{$url}#breadcrumb" ],
+                "inLanguage" => $language,
+            ],
+            [
+                "@type" => "BreadcrumbList",
+                "@id" => "{$url}#breadcrumb",
+                "itemListElement" => [
+                    [
+                        "@type" => "ListItem",
+                        "position" => 1,
+                        "name" => "Home",
+                        "item" => $site_url
+                    ],
+                    [
+                        "@type" => "ListItem",
+                        "position" => 2,
+                        "name" => $title,
+                        "item" => $url
+                    ]
+                ]
+            ],
+            [
+                "@type" => "WebSite",
+                "@id" => "{$site_url}#website",
+                "url" => $site_url,
+                "name" => $site_name,
+                "description" => get_bloginfo( 'description' ),
+                "publisher" => [ "@id" => "{$site_url}#organization" ],
+                "potentialAction" => [
+                    [
+                        "@type" => "SearchAction",
+                        "target" => [
+                            "@type" => "EntryPoint",
+                            "urlTemplate" => "{$site_url}?s={search_term_string}"
+                        ],
+                        "query-input" => [
+                            "@type" => "PropertyValueSpecification",
+                            "valueRequired" => true,
+                            "valueName" => "search_term_string"
+                        ]
+                    ]
+                ],
+                "inLanguage" => $language
+            ],
+            [
+                "@type" => "Organization",
+                "@id" => "{$site_url}#organization",
+                "name" => $site_name,
+                "url" => $site_url,
+                "logo" => [
+                    "@type" => "ImageObject",
+                    "inLanguage" => $language,
+                    "@id" => "{$site_url}#/schema/logo/image/",
+                    "url" => get_site_icon_url(),
+                    "contentUrl" => get_site_icon_url(),
+                    "width" => 512,
+                    "height" => 512,
+                    "caption" => $site_name
+                ],
+                "image" => [ "@id" => "{$site_url}#/schema/logo/image/" ]
+            ]
+        ];
+        
+        // Add image to CollectionPage if available
+        if ( $image_url ) {
+            $graph[0]["primaryImageOfPage"] = [ "@id" => "{$url}#primaryimage" ];
+            $graph[0]["image"] = [ "@id" => "{$url}#primaryimage" ];
+            $graph[0]["thumbnailUrl"] = $image_url;
+            
+            // Add image object
+            $graph[] = [
+                "@type" => "ImageObject",
+                "inLanguage" => $language,
+                "@id" => "{$url}#primaryimage",
+                "url" => $image_url,
+                "contentUrl" => $image_url,
+                "width" => $image_width,
+                "height" => $image_height,
+                "caption" => $title
+            ];
+        }
+        
+        $jsonld = [
+            "@context" => "https://schema.org",
+            "@graph" => $graph
+        ];
+        
+        echo '<script type="application/ld+json" class="seoplugin-schema-graph">' .
+             wp_json_encode( $jsonld, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) .
+             '</script>' . "\n";
+    }
 
     // Site domain URL shortcode
     public function site_domain_url_shortcode() {

@@ -1209,6 +1209,390 @@ class SEOPlugin_Admin {
         
         return false;
     }
+    
+    // Initialize term meta support
+    public function init_term_meta() {
+        // Register term meta fields
+        register_term_meta( 'category', '_seoplugin_meta_title', [
+            'type' => 'string',
+            'description' => 'SEO Title for category',
+            'single' => true,
+            'sanitize_callback' => 'sanitize_text_field',
+        ] );
+        
+        register_term_meta( 'category', '_seoplugin_meta_description', [
+            'type' => 'string',
+            'description' => 'SEO Description for category',
+            'single' => true,
+            'sanitize_callback' => 'sanitize_textarea_field',
+        ] );
+        
+        register_term_meta( 'category', '_seoplugin_og_image_id', [
+            'type' => 'integer',
+            'description' => 'OG Image ID for category',
+            'single' => true,
+            'sanitize_callback' => 'absint',
+        ] );
+        
+        register_term_meta( 'category', '_seoplugin_focus_keyword', [
+            'type' => 'string',
+            'description' => 'Focus keyword for category',
+            'single' => true,
+            'sanitize_callback' => 'sanitize_text_field',
+        ] );
+        
+        register_term_meta( 'category', '_seoplugin_robots_meta', [
+            'type' => 'string',
+            'description' => 'Robots meta for category',
+            'single' => true,
+            'sanitize_callback' => 'sanitize_text_field',
+        ] );
+        
+        register_term_meta( 'category', '_seoplugin_canonical_url', [
+            'type' => 'string',
+            'description' => 'Canonical URL for category',
+            'single' => true,
+            'sanitize_callback' => 'esc_url_raw',
+        ] );
+        
+        // Register for tags and custom taxonomies
+        $taxonomies = get_taxonomies( [ 'public' => true ] );
+        foreach ( $taxonomies as $taxonomy ) {
+            if ( $taxonomy === 'category' ) continue; // Already registered above
+            
+            register_term_meta( $taxonomy, '_seoplugin_meta_title', [
+                'type' => 'string',
+                'description' => 'SEO Title',
+                'single' => true,
+                'sanitize_callback' => 'sanitize_text_field',
+            ] );
+            
+            register_term_meta( $taxonomy, '_seoplugin_meta_description', [
+                'type' => 'string',
+                'description' => 'SEO Description',
+                'single' => true,
+                'sanitize_callback' => 'sanitize_textarea_field',
+            ] );
+            
+            register_term_meta( $taxonomy, '_seoplugin_og_image_id', [
+                'type' => 'integer',
+                'description' => 'OG Image ID',
+                'single' => true,
+                'sanitize_callback' => 'absint',
+            ] );
+            
+            register_term_meta( $taxonomy, '_seoplugin_focus_keyword', [
+                'type' => 'string',
+                'description' => 'Focus keyword',
+                'single' => true,
+                'sanitize_callback' => 'sanitize_text_field',
+            ] );
+            
+            register_term_meta( $taxonomy, '_seoplugin_robots_meta', [
+                'type' => 'string',
+                'description' => 'Robots meta',
+                'single' => true,
+                'sanitize_callback' => 'sanitize_text_field',
+            ] );
+            
+            register_term_meta( $taxonomy, '_seoplugin_canonical_url', [
+                'type' => 'string',
+                'description' => 'Canonical URL',
+                'single' => true,
+                'sanitize_callback' => 'esc_url_raw',
+            ] );
+        }
+    }
+    
+    // Add category meta fields (for new categories)
+    public function add_category_meta_fields( $taxonomy ) {
+        ?>
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_meta_title"><?php _e( 'SEO Title', 'seoplugin' ); ?></label>
+            <input type="text" id="seoplugin_meta_title" name="seoplugin_meta_title" value="" size="40" maxlength="65" class="frmtxt" />
+            <p class="description"><?php _e( 'The SEO title for this term. Leave blank to use the term name.', 'seoplugin' ); ?> <span id="seoTitleCharCount">0</span>/65</p>
+        </div>
+        
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_meta_description"><?php _e( 'Meta Description', 'seoplugin' ); ?></label>
+            <textarea id="seoplugin_meta_description" name="seoplugin_meta_description" rows="3" cols="50" maxlength="160" class="frmtxt"></textarea>
+            <p class="description"><?php _e( 'The meta description for this term.', 'seoplugin' ); ?> <span id="seoDescriptionCharCount">0</span>/160</p>
+        </div>
+        
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_focus_keyword"><?php _e( 'Focus Keyword', 'seoplugin' ); ?></label>
+            <input type="text" id="seoplugin_focus_keyword" name="seoplugin_focus_keyword" value="" size="40" class="frmtxt" />
+            <p class="description"><?php _e( 'The main keyword you want this term to rank for.', 'seoplugin' ); ?></p>
+        </div>
+        
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_og_image_id"><?php _e( 'Open Graph Image', 'seoplugin' ); ?></label>
+            <input type="hidden" id="seoplugin_og_image_id" name="seoplugin_og_image_id" value="" />
+            <div id="seoplugin_og_image_preview"></div>
+            <button type="button" id="seoplugin_og_image_button" class="button"><?php _e( 'Select OG Image', 'seoplugin' ); ?></button>
+            <p class="description"><?php _e( 'Image that will be used when this term is shared on social media.', 'seoplugin' ); ?></p>
+        </div>
+        
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_robots_meta"><?php _e( 'Robots Meta', 'seoplugin' ); ?></label>
+            <select id="seoplugin_robots_meta" name="seoplugin_robots_meta" class="frmtxt">
+                <option value=""><?php _e( 'Default (index, follow)', 'seoplugin' ); ?></option>
+                <option value="noindex,follow"><?php _e( 'No Index, Follow', 'seoplugin' ); ?></option>
+                <option value="index,nofollow"><?php _e( 'Index, No Follow', 'seoplugin' ); ?></option>
+                <option value="noindex,nofollow"><?php _e( 'No Index, No Follow', 'seoplugin' ); ?></option>
+            </select>
+            <p class="description"><?php _e( 'How search engines should treat this term.', 'seoplugin' ); ?></p>
+        </div>
+        
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_canonical_url"><?php _e( 'Canonical URL', 'seoplugin' ); ?></label>
+            <input type="url" id="seoplugin_canonical_url" name="seoplugin_canonical_url" value="" size="40" class="frmtxt" />
+            <p class="description"><?php _e( 'The canonical URL for this term. Leave blank to use the default URL.', 'seoplugin' ); ?></p>
+        </div>
+        
+        <script>
+        jQuery(document).ready(function($) {
+            initCharCounter('seoplugin_meta_title', 65, 'seoTitleCharCount');
+            initCharCounter('seoplugin_meta_description', 160, 'seoDescriptionCharCount');
+            
+            // OG Image selector
+            $('#seoplugin_og_image_button').on('click', function(e) {
+                e.preventDefault();
+                
+                const image_frame = wp.media({
+                    title: 'Select OG Image',
+                    library: { type: 'image' },
+                    button: { text: 'Use This Image' },
+                    multiple: false
+                });
+                
+                image_frame.on('select', function() {
+                    const attachment = image_frame.state().get('selection').first().toJSON();
+                    $('#seoplugin_og_image_id').val(attachment.id);
+                    $('#seoplugin_og_image_preview').html(
+                        '<img src="' + attachment.url + '" style="max-width:200px; height:auto; margin-top:10px;" />'
+                    );
+                });
+                
+                image_frame.open();
+            });
+        });
+        </script>
+        <?php
+    }
+    
+    // Edit category meta fields (for existing categories)
+    public function edit_category_meta_fields( $term, $taxonomy = '' ) {
+        $term_id = $term->term_id;
+        $meta_title = get_term_meta( $term_id, '_seoplugin_meta_title', true );
+        $meta_description = get_term_meta( $term_id, '_seoplugin_meta_description', true );
+        $focus_keyword = get_term_meta( $term_id, '_seoplugin_focus_keyword', true );
+        $og_image_id = get_term_meta( $term_id, '_seoplugin_og_image_id', true );
+        $robots_meta = get_term_meta( $term_id, '_seoplugin_robots_meta', true );
+        $canonical_url = get_term_meta( $term_id, '_seoplugin_canonical_url', true );
+        
+        // Get OG image preview
+        $og_image_preview = '';
+        if ( $og_image_id ) {
+            $og_image_url = wp_get_attachment_image_url( $og_image_id, 'medium' );
+            if ( $og_image_url ) {
+                $og_image_preview = '<img src="' . esc_url( $og_image_url ) . '" style="max-width:200px; height:auto; margin-top:10px;" />';
+            }
+        }
+        ?>
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_meta_title"><?php _e( 'SEO Title', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <input type="text" id="seoplugin_meta_title" name="seoplugin_meta_title" value="<?php echo esc_attr( $meta_title ); ?>" size="40" maxlength="65" class="frmtxt" />
+                <p class="description"><?php _e( 'The SEO title for this term. Leave blank to use the term name.', 'seoplugin' ); ?> <span id="seoTitleCharCount"><?php echo strlen( $meta_title ); ?></span>/65</p>
+            </td>
+        </tr>
+        
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_meta_description"><?php _e( 'Meta Description', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <textarea id="seoplugin_meta_description" name="seoplugin_meta_description" rows="3" cols="50" maxlength="160" class="frmtxt"><?php echo esc_textarea( $meta_description ); ?></textarea>
+                <p class="description"><?php _e( 'The meta description for this term.', 'seoplugin' ); ?> <span id="seoDescriptionCharCount"><?php echo strlen( $meta_description ); ?></span>/160</p>
+            </td>
+        </tr>
+        
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_focus_keyword"><?php _e( 'Focus Keyword', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <input type="text" id="seoplugin_focus_keyword" name="seoplugin_focus_keyword" value="<?php echo esc_attr( $focus_keyword ); ?>" size="40" class="frmtxt" />
+                <p class="description"><?php _e( 'The main keyword you want this term to rank for.', 'seoplugin' ); ?></p>
+            </td>
+        </tr>
+        
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_og_image_id"><?php _e( 'Open Graph Image', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <input type="hidden" id="seoplugin_og_image_id" name="seoplugin_og_image_id" value="<?php echo esc_attr( $og_image_id ); ?>" />
+                <div id="seoplugin_og_image_preview"><?php echo $og_image_preview; ?></div>
+                <button type="button" id="seoplugin_og_image_button" class="button"><?php _e( 'Select OG Image', 'seoplugin' ); ?></button>
+                <?php if ( $og_image_id ): ?>
+                    <button type="button" id="seoplugin_remove_og_image" class="button"><?php _e( 'Remove Image', 'seoplugin' ); ?></button>
+                <?php endif; ?>
+                <p class="description"><?php _e( 'Image that will be used when this term is shared on social media.', 'seoplugin' ); ?></p>
+            </td>
+        </tr>
+        
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_robots_meta"><?php _e( 'Robots Meta', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <select id="seoplugin_robots_meta" name="seoplugin_robots_meta" class="frmtxt">
+                    <option value="" <?php selected( $robots_meta, '' ); ?>><?php _e( 'Default (index, follow)', 'seoplugin' ); ?></option>
+                    <option value="noindex,follow" <?php selected( $robots_meta, 'noindex,follow' ); ?>><?php _e( 'No Index, Follow', 'seoplugin' ); ?></option>
+                    <option value="index,nofollow" <?php selected( $robots_meta, 'index,nofollow' ); ?>><?php _e( 'Index, No Follow', 'seoplugin' ); ?></option>
+                    <option value="noindex,nofollow" <?php selected( $robots_meta, 'noindex,nofollow' ); ?>><?php _e( 'No Index, No Follow', 'seoplugin' ); ?></option>
+                </select>
+                <p class="description"><?php _e( 'How search engines should treat this term.', 'seoplugin' ); ?></p>
+            </td>
+        </tr>
+        
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_canonical_url"><?php _e( 'Canonical URL', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <input type="url" id="seoplugin_canonical_url" name="seoplugin_canonical_url" value="<?php echo esc_attr( $canonical_url ); ?>" size="40" class="frmtxt" />
+                <p class="description"><?php _e( 'The canonical URL for this term. Leave blank to use the default URL.', 'seoplugin' ); ?></p>
+            </td>
+        </tr>
+        
+        <!-- SEO Preview for Categories -->
+        <tr class="form-field term-seo-wrap">
+            <th scope="row"><?php _e( 'SEO Preview', 'seoplugin' ); ?></th>
+            <td>
+                <div class="google-view">
+                    <div class="google-wrap-content">
+                        <div class="header-logo">
+                            <div class="divddercolunm">
+                                <div class="google-logo">
+                                    <img class="logo" src="<?php echo esc_url( get_site_icon_url( 32 ) ?: 'https://www.google.com/favicon.ico' ); ?>" alt="Site Icon">
+                                </div>
+                                <div class="google-site">
+                                    <div class="google-site-domain"><?php echo esc_html( parse_url( home_url(), PHP_URL_HOST ) ); ?></div>
+                                    <div class="site-down-color">[<?php echo esc_html( $term->name ); ?>]</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="wrp-google-title">
+                            <h3 class="google-title">
+                                <a href="#" class="google-title3" id="preview-title">
+                                    <?php echo esc_html( $meta_title ?: $term->name ); ?>
+                                </a>
+                            </h3>
+                        </div>
+                        <div class="wrp-google-decription" id="preview-description">
+                            <?php echo esc_html( $meta_description ?: ( $term->description ?: 'Browse our ' . $term->name . ' content.' ) ); ?>
+                        </div>
+                    </div>
+                </div>
+            </td>
+        </tr>
+        
+        <script>
+        jQuery(document).ready(function($) {
+            initCharCounter('seoplugin_meta_title', 65, 'seoTitleCharCount');
+            initCharCounter('seoplugin_meta_description', 160, 'seoDescriptionCharCount');
+            
+            // Update preview when fields change
+            $('#seoplugin_meta_title').on('input', function() {
+                const title = $(this).val() || '<?php echo esc_js( $term->name ); ?>';
+                $('#preview-title').text(title);
+            });
+            
+            $('#seoplugin_meta_description').on('input', function() {
+                const desc = $(this).val() || '<?php echo esc_js( $term->description ?: 'Browse our ' . $term->name . ' content.' ); ?>';
+                $('#preview-description').text(desc);
+            });
+            
+            // OG Image selector
+            $('#seoplugin_og_image_button').on('click', function(e) {
+                e.preventDefault();
+                
+                const image_frame = wp.media({
+                    title: 'Select OG Image',
+                    library: { type: 'image' },
+                    button: { text: 'Use This Image' },
+                    multiple: false
+                });
+                
+                image_frame.on('select', function() {
+                    const attachment = image_frame.state().get('selection').first().toJSON();
+                    $('#seoplugin_og_image_id').val(attachment.id);
+                    $('#seoplugin_og_image_preview').html(
+                        '<img src="' + attachment.url + '" style="max-width:200px; height:auto; margin-top:10px;" />'
+                    );
+                    
+                    // Add remove button if not exists
+                    if (!$('#seoplugin_remove_og_image').length) {
+                        $('#seoplugin_og_image_button').after('<button type="button" id="seoplugin_remove_og_image" class="button" style="margin-left:10px;">Remove Image</button>');
+                    }
+                });
+                
+                image_frame.open();
+            });
+            
+            // Remove OG Image
+            $(document).on('click', '#seoplugin_remove_og_image', function(e) {
+                e.preventDefault();
+                $('#seoplugin_og_image_id').val('');
+                $('#seoplugin_og_image_preview').html('');
+                $(this).remove();
+            });
+        });
+        </script>
+        <?php
+    }
+    
+    // Save category meta data
+    public function save_category_meta( $term_id ) {
+        if ( ! current_user_can( 'manage_categories' ) ) {
+            return;
+        }
+        
+        // Save meta title
+        if ( isset( $_POST['seoplugin_meta_title'] ) ) {
+            update_term_meta( $term_id, '_seoplugin_meta_title', sanitize_text_field( $_POST['seoplugin_meta_title'] ) );
+        }
+        
+        // Save meta description
+        if ( isset( $_POST['seoplugin_meta_description'] ) ) {
+            update_term_meta( $term_id, '_seoplugin_meta_description', sanitize_textarea_field( $_POST['seoplugin_meta_description'] ) );
+        }
+        
+        // Save focus keyword
+        if ( isset( $_POST['seoplugin_focus_keyword'] ) ) {
+            update_term_meta( $term_id, '_seoplugin_focus_keyword', sanitize_text_field( $_POST['seoplugin_focus_keyword'] ) );
+        }
+        
+        // Save OG image
+        if ( isset( $_POST['seoplugin_og_image_id'] ) ) {
+            update_term_meta( $term_id, '_seoplugin_og_image_id', absint( $_POST['seoplugin_og_image_id'] ) );
+        }
+        
+        // Save robots meta
+        if ( isset( $_POST['seoplugin_robots_meta'] ) ) {
+            update_term_meta( $term_id, '_seoplugin_robots_meta', sanitize_text_field( $_POST['seoplugin_robots_meta'] ) );
+        }
+        
+        // Save canonical URL
+        if ( isset( $_POST['seoplugin_canonical_url'] ) ) {
+            update_term_meta( $term_id, '_seoplugin_canonical_url', esc_url_raw( $_POST['seoplugin_canonical_url'] ) );
+        }
+    }
 }
 
 new SEOPlugin_Admin();
