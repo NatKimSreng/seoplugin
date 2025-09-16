@@ -1,6 +1,6 @@
 <?php
 /**
- * SEOPlugin Admin Settings
+ * SEOPlugin Admin Functionality
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -9,22 +9,718 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class SEOPlugin_Admin {
     public function __construct() {
-        add_action( 'admin_menu', [ $this, 'add_settings_page' ] );
+        add_action( 'add_meta_boxes', [ $this, 'add_meta_boxes' ] );
+        add_action( 'save_post', [ $this, 'save_post_meta' ] );
+        add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_assets' ] );
+        add_action( 'admin_enqueue_scripts', [ $this, 'admin_enqueue_assets' ] );
+        add_action( 'admin_menu', [ $this, 'add_admin_menu' ] );
         add_action( 'admin_init', [ $this, 'register_settings' ] );
-        add_action( 'add_meta_boxes', [ $this, 'add_meta_box' ] );
-        add_action( 'save_post', [ $this, 'save_meta_box' ] );
-        add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin_scripts' ] );
-        add_action( 'init', [ $this, 'register_image_sizes' ] );
-        add_action( 'after_setup_theme', [ $this, 'register_image_sizes' ] );
-        add_action( 'wp_ajax_seoplugin_regen_og_custom', [ $this, 'regen_og_custom_callback' ] );
-        add_action( 'wp_ajax_seoplugin_ai_generate_title', [ $this, 'ai_generate_title_callback' ] );
-        add_action( 'wp_ajax_seoplugin_ai_generate_description', [ $this, 'ai_generate_description_callback' ] );
-        add_action( 'wp_ajax_seoplugin_ai_suggest_keywords', [ $this, 'ai_suggest_keywords_callback' ] );
-        add_action( 'wp_ajax_seoplugin_ai_analyze_content', [ $this, 'ai_analyze_content_callback' ] );
+        add_action( 'wp_ajax_seoplugin_regen_og_custom', [ $this, 'ajax_regen_og_custom' ] );
+        add_action( 'wp_ajax_seoplugin_ai_generate_title', [ $this, 'ajax_ai_generate_title' ] );
+        add_action( 'wp_ajax_seoplugin_ai_generate_description', [ $this, 'ajax_ai_generate_description' ] );
+        add_action( 'wp_ajax_seoplugin_ai_suggest_keywords', [ $this, 'ajax_ai_suggest_keywords' ] );
+        add_action( 'wp_ajax_seoplugin_ai_analyze_content', [ $this, 'ajax_ai_analyze_content' ] );
+        
+        // Category/Term SEO hooks
+        add_action( 'init', [ $this, 'init_term_seo' ] );
     }
 
-    // Add settings page
-    public function add_settings_page() {
+    // Initialize term SEO for all public taxonomies
+    public function init_term_seo() {
+        $taxonomies = get_taxonomies( [ 'public' => true ], 'names' );
+        
+        foreach ( $taxonomies as $taxonomy ) {
+            // Add form fields
+            add_action( "{$taxonomy}_add_form_fields", [ $this, 'add_term_seo_fields' ] );
+            add_action( "{$taxonomy}_edit_form_fields", [ $this, 'edit_term_seo_fields' ] );
+            
+            // Save term meta
+            add_action( "created_{$taxonomy}", [ $this, 'save_term_seo_fields' ] );
+            add_action( "edited_{$taxonomy}", [ $this, 'save_term_seo_fields' ] );
+        }
+    }
+
+    // Add SEO fields to term add form
+    public function add_term_seo_fields( $taxonomy ) {
+        ?>
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_meta_title"><?php _e( 'SEO Title', 'seoplugin' ); ?></label>
+            <input type="text" id="seoplugin_meta_title" name="seoplugin_meta_title" class="frmtxt" maxlength="65" />
+            <p class="description">
+                <?php _e( 'Custom title for search engines (recommended: 30-65 characters)', 'seoplugin' ); ?>
+                <br><span id="seoTitleCharCount">0</span>/65 characters
+            </p>
+        </div>
+
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_meta_description"><?php _e( 'Meta Description', 'seoplugin' ); ?></label>
+            <textarea id="seoplugin_meta_description" name="seoplugin_meta_description" class="frmtxt" rows="3" maxlength="160"></textarea>
+            <p class="description">
+                <?php _e( 'Brief description for search engines (recommended: 120-160 characters)', 'seoplugin' ); ?>
+                <br><span id="seoDescriptionCharCount">0</span>/160 characters
+            </p>
+        </div>
+
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_focus_keyword"><?php _e( 'Focus Keyword', 'seoplugin' ); ?></label>
+            <input type="text" id="seoplugin_focus_keyword" name="seoplugin_focus_keyword" class="frmtxt" />
+            <p class="description"><?php _e( 'Main keyword to optimize this category for', 'seoplugin' ); ?></p>
+        </div>
+
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_og_image_id"><?php _e( 'Open Graph Image', 'seoplugin' ); ?></label>
+            <input type="hidden" id="seoplugin_og_image_id" name="seoplugin_og_image_id" />
+            <div id="seoplugin_og_image_preview"></div>
+            <button type="button" id="seoplugin_og_image_button" class="button"><?php _e( 'Select Image', 'seoplugin' ); ?></button>
+            <button type="button" id="seoplugin_remove_og_image" class="button" style="display:none;"><?php _e( 'Remove Image', 'seoplugin' ); ?></button>
+            <p class="description"><?php _e( 'Image for social media sharing (recommended: 1200x630px)', 'seoplugin' ); ?></p>
+        </div>
+
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_robots_meta"><?php _e( 'Robots Meta', 'seoplugin' ); ?></label>
+            <select id="seoplugin_robots_meta" name="seoplugin_robots_meta" class="frmtxt">
+                <option value=""><?php _e( 'Default (index, follow)', 'seoplugin' ); ?></option>
+                <option value="noindex,follow"><?php _e( 'No Index, Follow', 'seoplugin' ); ?></option>
+                <option value="index,nofollow"><?php _e( 'Index, No Follow', 'seoplugin' ); ?></option>
+                <option value="noindex,nofollow"><?php _e( 'No Index, No Follow', 'seoplugin' ); ?></option>
+            </select>
+            <p class="description"><?php _e( 'Control how search engines index this category', 'seoplugin' ); ?></p>
+        </div>
+
+        <div class="form-field term-seo-wrap">
+            <label for="seoplugin_canonical_url"><?php _e( 'Canonical URL', 'seoplugin' ); ?></label>
+            <input type="url" id="seoplugin_canonical_url" name="seoplugin_canonical_url" class="frmtxt" />
+            <p class="description"><?php _e( 'Custom canonical URL (leave empty for default)', 'seoplugin' ); ?></p>
+        </div>
+
+        <script>
+        jQuery(document).ready(function($) {
+            // Initialize character counters
+            initCharCounter('seoplugin_meta_title', 65, 'seoTitleCharCount');
+            initCharCounter('seoplugin_meta_description', 160, 'seoDescriptionCharCount');
+            
+            // Initialize media uploader
+            initTermMediaUploader();
+        });
+        
+        function initTermMediaUploader() {
+            jQuery('#seoplugin_og_image_button').on('click', function(e) {
+                e.preventDefault();
+                
+                const frame = wp.media({
+                    title: 'Select Open Graph Image',
+                    button: { text: 'Use This Image' },
+                    multiple: false,
+                    library: { type: 'image' }
+                });
+                
+                frame.on('select', function() {
+                    const attachment = frame.state().get('selection').first().toJSON();
+                    jQuery('#seoplugin_og_image_id').val(attachment.id);
+                    jQuery('#seoplugin_og_image_preview').html(
+                        '<img src="' + attachment.url + '" style="max-width: 300px; height: auto; border-radius: 4px;" />'
+                    );
+                    jQuery('#seoplugin_remove_og_image').show();
+                });
+                
+                frame.open();
+            });
+            
+            jQuery('#seoplugin_remove_og_image').on('click', function(e) {
+                e.preventDefault();
+                jQuery('#seoplugin_og_image_id').val('');
+                jQuery('#seoplugin_og_image_preview').html('');
+                jQuery(this).hide();
+            });
+        }
+        </script>
+        <?php
+    }
+
+    // Add SEO fields to term edit form
+    public function edit_term_seo_fields( $term ) {
+        $meta_title = get_term_meta( $term->term_id, '_seoplugin_meta_title', true );
+        $meta_description = get_term_meta( $term->term_id, '_seoplugin_meta_description', true );
+        $focus_keyword = get_term_meta( $term->term_id, '_seoplugin_focus_keyword', true );
+        $og_image_id = get_term_meta( $term->term_id, '_seoplugin_og_image_id', true );
+        $robots_meta = get_term_meta( $term->term_id, '_seoplugin_robots_meta', true );
+        $canonical_url = get_term_meta( $term->term_id, '_seoplugin_canonical_url', true );
+        
+        $og_image_url = '';
+        if ( $og_image_id ) {
+            $og_image_url = wp_get_attachment_image_url( $og_image_id, 'medium' );
+        }
+        ?>
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_meta_title"><?php _e( 'SEO Title', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <input type="text" id="seoplugin_meta_title" name="seoplugin_meta_title" class="frmtxt" 
+                       value="<?php echo esc_attr( $meta_title ); ?>" maxlength="65" />
+                <p class="description">
+                    <?php _e( 'Custom title for search engines (recommended: 30-65 characters)', 'seoplugin' ); ?>
+                    <br><span id="seoTitleCharCount"><?php echo strlen( $meta_title ); ?></span>/65 characters
+                </p>
+            </td>
+        </tr>
+
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_meta_description"><?php _e( 'Meta Description', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <textarea id="seoplugin_meta_description" name="seoplugin_meta_description" class="frmtxt" 
+                          rows="3" maxlength="160"><?php echo esc_textarea( $meta_description ); ?></textarea>
+                <p class="description">
+                    <?php _e( 'Brief description for search engines (recommended: 120-160 characters)', 'seoplugin' ); ?>
+                    <br><span id="seoDescriptionCharCount"><?php echo strlen( $meta_description ); ?></span>/160 characters
+                </p>
+            </td>
+        </tr>
+
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_focus_keyword"><?php _e( 'Focus Keyword', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <input type="text" id="seoplugin_focus_keyword" name="seoplugin_focus_keyword" class="frmtxt" 
+                       value="<?php echo esc_attr( $focus_keyword ); ?>" />
+                <p class="description"><?php _e( 'Main keyword to optimize this category for', 'seoplugin' ); ?></p>
+            </td>
+        </tr>
+
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_og_image_id"><?php _e( 'Open Graph Image', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <input type="hidden" id="seoplugin_og_image_id" name="seoplugin_og_image_id" 
+                       value="<?php echo esc_attr( $og_image_id ); ?>" />
+                <div id="seoplugin_og_image_preview">
+                    <?php if ( $og_image_url ): ?>
+                        <img src="<?php echo esc_url( $og_image_url ); ?>" 
+                             style="max-width: 300px; height: auto; border-radius: 4px;" />
+                    <?php endif; ?>
+                </div>
+                <button type="button" id="seoplugin_og_image_button" class="button">
+                    <?php _e( 'Select Image', 'seoplugin' ); ?>
+                </button>
+                <button type="button" id="seoplugin_remove_og_image" class="button" 
+                        style="<?php echo $og_image_id ? '' : 'display:none;'; ?>">
+                    <?php _e( 'Remove Image', 'seoplugin' ); ?>
+                </button>
+                <p class="description"><?php _e( 'Image for social media sharing (recommended: 1200x630px)', 'seoplugin' ); ?></p>
+            </td>
+        </tr>
+
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_robots_meta"><?php _e( 'Robots Meta', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <select id="seoplugin_robots_meta" name="seoplugin_robots_meta" class="frmtxt">
+                    <option value="" <?php selected( $robots_meta, '' ); ?>><?php _e( 'Default (index, follow)', 'seoplugin' ); ?></option>
+                    <option value="noindex,follow" <?php selected( $robots_meta, 'noindex,follow' ); ?>><?php _e( 'No Index, Follow', 'seoplugin' ); ?></option>
+                    <option value="index,nofollow" <?php selected( $robots_meta, 'index,nofollow' ); ?>><?php _e( 'Index, No Follow', 'seoplugin' ); ?></option>
+                    <option value="noindex,nofollow" <?php selected( $robots_meta, 'noindex,nofollow' ); ?>><?php _e( 'No Index, No Follow', 'seoplugin' ); ?></option>
+                </select>
+                <p class="description"><?php _e( 'Control how search engines index this category', 'seoplugin' ); ?></p>
+            </td>
+        </tr>
+
+        <tr class="form-field term-seo-wrap">
+            <th scope="row">
+                <label for="seoplugin_canonical_url"><?php _e( 'Canonical URL', 'seoplugin' ); ?></label>
+            </th>
+            <td>
+                <input type="url" id="seoplugin_canonical_url" name="seoplugin_canonical_url" class="frmtxt" 
+                       value="<?php echo esc_attr( $canonical_url ); ?>" />
+                <p class="description"><?php _e( 'Custom canonical URL (leave empty for default)', 'seoplugin' ); ?></p>
+            </td>
+        </tr>
+
+        <tr class="form-field term-seo-wrap">
+            <th scope="row"><?php _e( 'SEO Preview', 'seoplugin' ); ?></th>
+            <td>
+                <div class="google-view">
+                    <div class="google-wrap-content">
+                        <div class="header-logo">
+                            <div class="divddercolunm">
+                                <div class="google-logo">
+                                    <img class="logo" src="<?php echo get_site_icon_url( 32 ) ?: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJMMTMuMDkgOC4yNkwyMCA5TDEzLjA5IDE1Ljc0TDEyIDIyTDEwLjkxIDE1Ljc0TDQgOUwxMC45MSA4LjI2TDEyIDJaIiBmaWxsPSIjNDI4NUY0Ii8+Cjwvc3ZnPgo='; ?>" alt="Site Icon">
+                                </div>
+                                <div class="google-site">
+                                    <div class="google-site-domain"><?php echo esc_html( parse_url( home_url(), PHP_URL_HOST ) ); ?></div>
+                                    <div class="site-down-color"><?php echo esc_url( get_term_link( $term ) ); ?></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="wrp-google-title">
+                            <h3 class="google-title">
+                                <a href="#" class="google-title3" id="preview-title">
+                                    <?php echo esc_html( $meta_title ?: $term->name ); ?>
+                                </a>
+                            </h3>
+                        </div>
+                        <div class="wrp-google-decription">
+                            <span id="preview-description">
+                                <?php echo esc_html( $meta_description ?: ( $term->description ?: 'Browse our ' . $term->name . ' content.' ) ); ?>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </td>
+        </tr>
+
+        <script>
+        jQuery(document).ready(function($) {
+            // Initialize character counters
+            initCharCounter('seoplugin_meta_title', 65, 'seoTitleCharCount');
+            initCharCounter('seoplugin_meta_description', 160, 'seoDescriptionCharCount');
+            
+            // Initialize media uploader
+            initTermMediaUploader();
+            
+            // Update preview on input
+            $('#seoplugin_meta_title').on('input', function() {
+                const title = $(this).val() || '<?php echo esc_js( $term->name ); ?>';
+                $('#preview-title').text(title);
+            });
+            
+            $('#seoplugin_meta_description').on('input', function() {
+                const desc = $(this).val() || '<?php echo esc_js( $term->description ?: 'Browse our ' . $term->name . ' content.' ); ?>';
+                $('#preview-description').text(desc);
+            });
+        });
+        
+        function initTermMediaUploader() {
+            jQuery('#seoplugin_og_image_button').on('click', function(e) {
+                e.preventDefault();
+                
+                const frame = wp.media({
+                    title: 'Select Open Graph Image',
+                    button: { text: 'Use This Image' },
+                    multiple: false,
+                    library: { type: 'image' }
+                });
+                
+                frame.on('select', function() {
+                    const attachment = frame.state().get('selection').first().toJSON();
+                    jQuery('#seoplugin_og_image_id').val(attachment.id);
+                    jQuery('#seoplugin_og_image_preview').html(
+                        '<img src="' + attachment.url + '" style="max-width: 300px; height: auto; border-radius: 4px;" />'
+                    );
+                    jQuery('#seoplugin_remove_og_image').show();
+                });
+                
+                frame.open();
+            });
+            
+            jQuery('#seoplugin_remove_og_image').on('click', function(e) {
+                e.preventDefault();
+                jQuery('#seoplugin_og_image_id').val('');
+                jQuery('#seoplugin_og_image_preview').html('');
+                jQuery(this).hide();
+            });
+        }
+        </script>
+        <?php
+    }
+
+    // Save term SEO fields
+    public function save_term_seo_fields( $term_id ) {
+        if ( ! current_user_can( 'manage_categories' ) ) {
+            return;
+        }
+
+        $fields = [
+            '_seoplugin_meta_title' => 'seoplugin_meta_title',
+            '_seoplugin_meta_description' => 'seoplugin_meta_description',
+            '_seoplugin_focus_keyword' => 'seoplugin_focus_keyword',
+            '_seoplugin_og_image_id' => 'seoplugin_og_image_id',
+            '_seoplugin_robots_meta' => 'seoplugin_robots_meta',
+            '_seoplugin_canonical_url' => 'seoplugin_canonical_url'
+        ];
+
+        foreach ( $fields as $meta_key => $post_key ) {
+            if ( isset( $_POST[ $post_key ] ) ) {
+                $value = sanitize_text_field( $_POST[ $post_key ] );
+                if ( $post_key === 'seoplugin_meta_description' ) {
+                    $value = sanitize_textarea_field( $_POST[ $post_key ] );
+                } elseif ( $post_key === 'seoplugin_canonical_url' ) {
+                    $value = esc_url_raw( $_POST[ $post_key ] );
+                } elseif ( $post_key === 'seoplugin_og_image_id' ) {
+                    $value = absint( $_POST[ $post_key ] );
+                }
+                
+                if ( ! empty( $value ) ) {
+                    update_term_meta( $term_id, $meta_key, $value );
+                } else {
+                    delete_term_meta( $term_id, $meta_key );
+                }
+            }
+        }
+    }
+
+    // Enqueue assets
+    public function enqueue_assets() {
+        wp_enqueue_style(
+            'seoplugin-styles',
+            SEOPLUGIN_URL . 'assets/css/seoplugin.css',
+            [],
+            SEOPLUGIN_VERSION
+        );
+    }
+
+    // Admin enqueue assets
+    public function admin_enqueue_assets( $hook ) {
+        // Enqueue on post edit pages and term edit pages
+        if ( in_array( $hook, [ 'post.php', 'post-new.php', 'edit-tags.php', 'term.php' ] ) || 
+             strpos( $hook, 'seoplugin' ) !== false ) {
+            
+            wp_enqueue_media();
+            wp_enqueue_style(
+                'seoplugin-admin-styles',
+                SEOPLUGIN_URL . 'assets/css/seoplugin.css',
+                [],
+                SEOPLUGIN_VERSION
+            );
+
+            wp_enqueue_script(
+                'seoplugin-admin-scripts',
+                SEOPLUGIN_URL . 'assets/js/seoplugin.js',
+                [ 'jquery', 'media-upload', 'media-views' ],
+                SEOPLUGIN_VERSION,
+                true
+            );
+
+            wp_localize_script( 'seoplugin-admin-scripts', 'seoplugin_ajax', [
+                'ajax_url' => admin_url( 'admin-ajax.php' ),
+                'nonce' => wp_create_nonce( 'seoplugin_nonce' )
+            ] );
+        }
+    }
+
+    // Add meta boxes
+    public function add_meta_boxes() {
+        $post_types = get_post_types( [ 'public' => true ], 'names' );
+        
+        foreach ( $post_types as $post_type ) {
+            add_meta_box(
+                'seoplugin_meta_box',
+                __( 'SEO Settings', 'seoplugin' ),
+                [ $this, 'render_meta_box' ],
+                $post_type,
+                'normal',
+                'high'
+            );
+        }
+    }
+
+    // Render meta box
+    public function render_meta_box( $post ) {
+        wp_nonce_field( 'seoplugin_meta_box', 'seoplugin_meta_box_nonce' );
+
+        $meta_title = get_post_meta( $post->ID, '_seoplugin_meta_title', true );
+        $meta_description = get_post_meta( $post->ID, '_seoplugin_meta_description', true );
+        $focus_keyword = get_post_meta( $post->ID, '_seoplugin_focus_keyword', true );
+        $og_image_id = get_post_meta( $post->ID, '_seoplugin_og_image_id', true );
+        $robots_meta = get_post_meta( $post->ID, '_seoplugin_robots_meta', true );
+        $canonical_url = get_post_meta( $post->ID, '_seoplugin_canonical_url', true );
+        $meta_keywords = get_post_meta( $post->ID, '_seoplugin_meta_keywords', true );
+        $schema_type = get_post_meta( $post->ID, '_seoplugin_schema_type', true );
+
+        $og_image_url = '';
+        if ( $og_image_id ) {
+            $og_image_url = wp_get_attachment_image_url( $og_image_id, 'medium' );
+        }
+        ?>
+        <div class="seoplugin_eseo">
+            <!-- SEO Analysis Section -->
+            <div class="seo-analysis-section">
+                <h3><?php _e( 'SEO Analysis', 'seoplugin' ); ?></h3>
+                <div class="seo-score-container">
+                    <div class="seo-score-circle">
+                        <span id="seo-score">0</span>
+                        <small>/ 100</small>
+                    </div>
+                    <div class="seo-analysis-details">
+                        <div class="seo-item">
+                            <span class="seo-icon">📝</span>
+                            <span class="seo-text"><?php _e( 'SEO Title Length', 'seoplugin' ); ?></span>
+                            <span class="seo-status" id="title-status">❌</span>
+                        </div>
+                        <div class="seo-item">
+                            <span class="seo-icon">📄</span>
+                            <span class="seo-text"><?php _e( 'Meta Description Length', 'seoplugin' ); ?></span>
+                            <span class="seo-status" id="desc-status">❌</span>
+                        </div>
+                        <div class="seo-item">
+                            <span class="seo-icon">🖼️</span>
+                            <span class="seo-text"><?php _e( 'Featured Image Set', 'seoplugin' ); ?></span>
+                            <span class="seo-status" id="image-status">❌</span>
+                        </div>
+                        <div class="seo-item">
+                            <span class="seo-icon">🎯</span>
+                            <span class="seo-text"><?php _e( 'Focus Keyword Usage', 'seoplugin' ); ?></span>
+                            <span class="seo-status" id="keyword-status">❌</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Basic SEO Fields -->
+            <div>
+                <label class="control-label" for="seoplugin_meta_title"><?php _e( 'SEO Title', 'seoplugin' ); ?></label>
+                <input type="text" id="seoplugin_meta_title" name="seoplugin_meta_title" class="widefat frmtxt" 
+                       value="<?php echo esc_attr( $meta_title ); ?>" maxlength="65" />
+                <p class="description">
+                    <?php _e( 'Custom title for search engines (recommended: 30-65 characters)', 'seoplugin' ); ?>
+                    <br><span id="seoTitleCharCount"><?php echo strlen( $meta_title ); ?></span>/65 characters
+                </p>
+            </div>
+
+            <div>
+                <label class="control-label" for="seoplugin_meta_description"><?php _e( 'Meta Description', 'seoplugin' ); ?></label>
+                <textarea id="seoplugin_meta_description" name="seoplugin_meta_description" class="widefat frmtxt" 
+                          rows="3" maxlength="160"><?php echo esc_textarea( $meta_description ); ?></textarea>
+                <p class="description">
+                    <?php _e( 'Brief description for search engines (recommended: 120-160 characters)', 'seoplugin' ); ?>
+                    <br><span id="seoDescriptionCharCount"><?php echo strlen( $meta_description ); ?></span>/160 characters
+                </p>
+            </div>
+
+            <div>
+                <label class="control-label" for="seoplugin_focus_keyword"><?php _e( 'Focus Keyword', 'seoplugin' ); ?></label>
+                <input type="text" id="seoplugin_focus_keyword" name="seoplugin_focus_keyword" class="widefat frmtxt" 
+                       value="<?php echo esc_attr( $focus_keyword ); ?>" />
+                <p class="description"><?php _e( 'Main keyword to optimize this content for', 'seoplugin' ); ?></p>
+            </div>
+
+            <!-- Open Graph Image -->
+            <div>
+                <label class="control-label"><?php _e( 'Open Graph Image', 'seoplugin' ); ?></label>
+                <input type="hidden" id="seoplugin_og_image_id" name="seoplugin_og_image_id" 
+                       value="<?php echo esc_attr( $og_image_id ); ?>" />
+                <div id="seoplugin_og_image_preview" class="seoplugin_og_image_preview">
+                    <?php if ( $og_image_url ): ?>
+                        <img src="<?php echo esc_url( $og_image_url ); ?>" 
+                             style="width:527px; height:352px; object-fit:cover;" />
+                    <?php endif; ?>
+                </div>
+                <button type="button" id="seoplugin_og_image_button" class="button">
+                    <?php _e( 'Select OG Image', 'seoplugin' ); ?>
+                </button>
+                <p class="description"><?php _e( 'Image for social media sharing (recommended: 1200x630px)', 'seoplugin' ); ?></p>
+            </div>
+
+            <!-- Google Preview -->
+            <div>
+                <label class="control-label"><?php _e( 'Google Preview', 'seoplugin' ); ?></label>
+                <div class="google-view">
+                    <div class="google-wrap-content">
+                        <div class="header-logo">
+                            <div class="divddercolunm">
+                                <div class="google-logo">
+                                    <img class="logo" src="<?php echo get_site_icon_url( 32 ) ?: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJMMTMuMDkgOC4yNkwyMCA5TDEzLjA5IDE1Ljc0TDEyIDIyTDEwLjkxIDE1Ljc0TDQgOUwxMC45MSA4LjI2TDEyIDJaIiBmaWxsPSIjNDI4NUY0Ii8+Cjwvc3ZnPgo='; ?>" alt="Site Icon">
+                                </div>
+                                <div class="google-site">
+                                    <div class="google-site-domain"><?php echo esc_html( parse_url( home_url(), PHP_URL_HOST ) ); ?></div>
+                                    <div class="site-down-color"><?php echo esc_url( get_permalink( $post->ID ) ?: home_url() ); ?></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="wrp-google-title">
+                            <h3 class="google-title">
+                                <a href="#" class="google-title3">
+                                    <?php echo esc_html( $meta_title ?: get_the_title( $post->ID ) ); ?>
+                                </a>
+                            </h3>
+                        </div>
+                        <div class="wrp-google-decription">
+                            <?php echo esc_html( $meta_description ?: get_the_excerpt( $post->ID ) ?: 'No description available.' ); ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Social Media Previews -->
+            <div class="social-previews">
+                <h3><?php _e( 'Social Media Previews', 'seoplugin' ); ?></h3>
+                <div class="social-tabs">
+                    <button type="button" class="social-tab active" data-tab="facebook"><?php _e( 'Facebook', 'seoplugin' ); ?></button>
+                    <button type="button" class="social-tab" data-tab="x"><?php _e( 'X (Twitter)', 'seoplugin' ); ?></button>
+                    <button type="button" class="social-tab" data-tab="linkedin"><?php _e( 'LinkedIn', 'seoplugin' ); ?></button>
+                </div>
+                
+                <div id="facebook-preview" class="social-preview active">
+                    <div class="social-card">
+                        <div class="social-image">
+                            <?php if ( $og_image_url ): ?>
+                                <img src="<?php echo esc_url( $og_image_url ); ?>" alt="Preview" />
+                            <?php else: ?>
+                                <div class="no-image"><?php _e( 'No Image', 'seoplugin' ); ?></div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="social-content">
+                            <div class="social-url"><?php echo esc_html( parse_url( home_url(), PHP_URL_HOST ) ); ?></div>
+                            <div class="social-title"><?php echo esc_html( $meta_title ?: get_the_title( $post->ID ) ); ?></div>
+                            <div class="social-description"><?php echo esc_html( $meta_description ?: 'Your description here...' ); ?></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="x-preview" class="social-preview">
+                    <div class="x-card">
+                        <div class="x-image">
+                            <?php if ( $og_image_url ): ?>
+                                <img src="<?php echo esc_url( $og_image_url ); ?>" alt="Preview" />
+                            <?php else: ?>
+                                <div class="no-image"><?php _e( 'No Image', 'seoplugin' ); ?></div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="x-content">
+                            <div class="x-url"><?php echo esc_html( parse_url( home_url(), PHP_URL_HOST ) ); ?></div>
+                            <div class="x-title"><?php echo esc_html( $meta_title ?: get_the_title( $post->ID ) ); ?></div>
+                            <div class="x-description"><?php echo esc_html( $meta_description ?: 'Your description here...' ); ?></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="linkedin-preview" class="social-preview">
+                    <div class="linkedin-card">
+                        <div class="linkedin-image">
+                            <?php if ( $og_image_url ): ?>
+                                <img src="<?php echo esc_url( $og_image_url ); ?>" alt="Preview" />
+                            <?php else: ?>
+                                <div class="no-image"><?php _e( 'No Image', 'seoplugin' ); ?></div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="linkedin-content">
+                            <div class="linkedin-url"><?php echo esc_html( parse_url( home_url(), PHP_URL_HOST ) ); ?></div>
+                            <div class="linkedin-title"><?php echo esc_html( $meta_title ?: get_the_title( $post->ID ) ); ?></div>
+                            <div class="linkedin-description"><?php echo esc_html( $meta_description ?: 'Your description here...' ); ?></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI SEO Assistant -->
+            <?php if ( get_option( 'seoplugin_ai_enabled', false ) ): ?>
+            <div class="ai-seo-assistant">
+                <h3><?php _e( '🤖 AI SEO Assistant', 'seoplugin' ); ?></h3>
+                <div class="ai-controls">
+                    <button type="button" id="ai-generate-title" class="button"><?php _e( 'Generate Title', 'seoplugin' ); ?></button>
+                    <button type="button" id="ai-generate-description" class="button"><?php _e( 'Generate Description', 'seoplugin' ); ?></button>
+                    <button type="button" id="ai-suggest-keywords" class="button"><?php _e( 'Suggest Keywords', 'seoplugin' ); ?></button>
+                    <button type="button" id="ai-analyze-content" class="button"><?php _e( 'Analyze Content', 'seoplugin' ); ?></button>
+                </div>
+                <div id="ai-loading" class="ai-loading" style="display:none;">
+                    <div class="spinner"></div>
+                    <span><?php _e( 'AI is working...', 'seoplugin' ); ?></span>
+                </div>
+                <div id="ai-suggestions" class="ai-suggestions" style="display:none;">
+                    <h4><?php _e( 'AI Suggestions', 'seoplugin' ); ?></h4>
+                    <div id="ai-suggestion-content"></div>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- Advanced SEO Options -->
+            <div class="advanced-seo-options">
+                <h3><?php _e( 'Advanced SEO Options', 'seoplugin' ); ?></h3>
+                
+                <div>
+                    <label class="control-label" for="seoplugin_meta_keywords"><?php _e( 'Meta Keywords', 'seoplugin' ); ?></label>
+                    <input type="text" id="seoplugin_meta_keywords" name="seoplugin_meta_keywords" class="widefat frmtxt" 
+                           value="<?php echo esc_attr( $meta_keywords ); ?>" />
+                    <span class="description"><?php _e( 'Comma-separated keywords (optional, not used by most search engines)', 'seoplugin' ); ?></span>
+                </div>
+
+                <div>
+                    <label class="control-label" for="seoplugin_robots_meta"><?php _e( 'Robots Meta', 'seoplugin' ); ?></label>
+                    <select id="seoplugin_robots_meta" name="seoplugin_robots_meta" class="frmtxt">
+                        <option value="" <?php selected( $robots_meta, '' ); ?>><?php _e( 'Default (index, follow)', 'seoplugin' ); ?></option>
+                        <option value="noindex,follow" <?php selected( $robots_meta, 'noindex,follow' ); ?>><?php _e( 'No Index, Follow', 'seoplugin' ); ?></option>
+                        <option value="index,nofollow" <?php selected( $robots_meta, 'index,nofollow' ); ?>><?php _e( 'Index, No Follow', 'seoplugin' ); ?></option>
+                        <option value="noindex,nofollow" <?php selected( $robots_meta, 'noindex,nofollow' ); ?>><?php _e( 'No Index, No Follow', 'seoplugin' ); ?></option>
+                    </select>
+                    <span class="description"><?php _e( 'Control how search engines crawl and index this content', 'seoplugin' ); ?></span>
+                </div>
+
+                <div>
+                    <label class="control-label" for="seoplugin_canonical_url"><?php _e( 'Canonical URL', 'seoplugin' ); ?></label>
+                    <input type="url" id="seoplugin_canonical_url" name="seoplugin_canonical_url" class="widefat frmtxt" 
+                           value="<?php echo esc_attr( $canonical_url ); ?>" />
+                    <span class="description"><?php _e( 'Custom canonical URL (leave empty for default)', 'seoplugin' ); ?></span>
+                </div>
+
+                <div>
+                    <label class="control-label" for="seoplugin_schema_type"><?php _e( 'Schema Type', 'seoplugin' ); ?></label>
+                    <select id="seoplugin_schema_type" name="seoplugin_schema_type" class="frmtxt">
+                        <option value="Article" <?php selected( $schema_type, 'Article' ); ?>><?php _e( 'Article', 'seoplugin' ); ?></option>
+                        <option value="BlogPosting" <?php selected( $schema_type, 'BlogPosting' ); ?>><?php _e( 'Blog Posting', 'seoplugin' ); ?></option>
+                        <option value="NewsArticle" <?php selected( $schema_type, 'NewsArticle' ); ?>><?php _e( 'News Article', 'seoplugin' ); ?></option>
+                        <option value="WebPage" <?php selected( $schema_type, 'WebPage' ); ?>><?php _e( 'Web Page', 'seoplugin' ); ?></option>
+                        <option value="Product" <?php selected( $schema_type, 'Product' ); ?>><?php _e( 'Product', 'seoplugin' ); ?></option>
+                        <option value="Event" <?php selected( $schema_type, 'Event' ); ?>><?php _e( 'Event', 'seoplugin' ); ?></option>
+                    </select>
+                    <span class="description"><?php _e( 'Schema.org structured data type for this content', 'seoplugin' ); ?></span>
+                </div>
+            </div>
+        </div>
+        <?php
+    }
+
+    // Save post meta
+    public function save_post_meta( $post_id ) {
+        if ( ! isset( $_POST['seoplugin_meta_box_nonce'] ) || 
+             ! wp_verify_nonce( $_POST['seoplugin_meta_box_nonce'], 'seoplugin_meta_box' ) ) {
+            return;
+        }
+
+        if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
+            return;
+        }
+
+        if ( ! current_user_can( 'edit_post', $post_id ) ) {
+            return;
+        }
+
+        $fields = [
+            '_seoplugin_meta_title' => 'seoplugin_meta_title',
+            '_seoplugin_meta_description' => 'seoplugin_meta_description',
+            '_seoplugin_focus_keyword' => 'seoplugin_focus_keyword',
+            '_seoplugin_og_image_id' => 'seoplugin_og_image_id',
+            '_seoplugin_robots_meta' => 'seoplugin_robots_meta',
+            '_seoplugin_canonical_url' => 'seoplugin_canonical_url',
+            '_seoplugin_meta_keywords' => 'seoplugin_meta_keywords',
+            '_seoplugin_schema_type' => 'seoplugin_schema_type'
+        ];
+
+        foreach ( $fields as $meta_key => $post_key ) {
+            if ( isset( $_POST[ $post_key ] ) ) {
+                $value = sanitize_text_field( $_POST[ $post_key ] );
+                if ( $post_key === 'seoplugin_meta_description' ) {
+                    $value = sanitize_textarea_field( $_POST[ $post_key ] );
+                } elseif ( $post_key === 'seoplugin_canonical_url' ) {
+                    $value = esc_url_raw( $_POST[ $post_key ] );
+                } elseif ( $post_key === 'seoplugin_og_image_id' ) {
+                    $value = absint( $_POST[ $post_key ] );
+                }
+                
+                if ( ! empty( $value ) ) {
+                    update_post_meta( $post_id, $meta_key, $value );
+                } else {
+                    delete_post_meta( $post_id, $meta_key );
+                }
+            }
+        }
+    }
+
+    // Add admin menu
+    public function add_admin_menu() {
         add_options_page(
             __( 'SEOPlugin Settings', 'seoplugin' ),
             __( 'SEOPlugin', 'seoplugin' ),
@@ -37,542 +733,218 @@ class SEOPlugin_Admin {
     // Register settings
     public function register_settings() {
         // General Settings
-        register_setting( 'seoplugin_general_group', 'seoplugin_default_meta_description', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_general_group', 'seoplugin_default_meta_title', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_general_group', 'seoplugin_separator', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_general_group', 'seoplugin_homepage_title', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_general_group', 'seoplugin_homepage_description', [
-            'sanitize_callback' => 'sanitize_textarea_field',
-        ] );
+        register_setting( 'seoplugin_general', 'seoplugin_homepage_title' );
+        register_setting( 'seoplugin_general', 'seoplugin_homepage_description' );
+        register_setting( 'seoplugin_general', 'seoplugin_separator' );
+        register_setting( 'seoplugin_general', 'seoplugin_default_meta_description' );
+        register_setting( 'seoplugin_general', 'seoplugin_default_og_image' );
 
         // Social Media Settings
-        register_setting( 'seoplugin_social_group', 'seoplugin_facebook_app_id', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
+        register_setting( 'seoplugin_social', 'seoplugin_facebook_app_id' );
+        register_setting( 'seoplugin_social', 'seoplugin_x_username' );
+        register_setting( 'seoplugin_social', 'seoplugin_linkedin_company_id' );
+        register_setting( 'seoplugin_social', 'seoplugin_instagram_username' );
+        register_setting( 'seoplugin_social', 'seoplugin_youtube_channel' );
+        register_setting( 'seoplugin_social', 'seoplugin_tiktok_username' );
 
-        register_setting( 'seoplugin_social_group', 'seoplugin_twitter_username', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_social_group', 'seoplugin_default_og_image', [
-            'sanitize_callback' => 'absint',
-        ] );
-
-        // AI Settings
-        register_setting( 'seoplugin_ai_group', 'seoplugin_ai_api_key', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_ai_group', 'seoplugin_ai_enabled', [
-            'sanitize_callback' => 'rest_sanitize_boolean',
-        ] );
+        // AI Assistant Settings
+        register_setting( 'seoplugin_ai', 'seoplugin_ai_enabled' );
+        register_setting( 'seoplugin_ai', 'seoplugin_gemini_api_key' );
 
         // Advanced Settings
-        register_setting( 'seoplugin_advanced_group', 'seoplugin_noindex_categories', [
-            'sanitize_callback' => 'rest_sanitize_boolean',
-        ] );
+        register_setting( 'seoplugin_advanced', 'seoplugin_xml_sitemap_enabled' );
+        register_setting( 'seoplugin_advanced', 'seoplugin_breadcrumbs_enabled' );
+        register_setting( 'seoplugin_advanced', 'seoplugin_noindex_categories' );
+        register_setting( 'seoplugin_advanced', 'seoplugin_noindex_tags' );
+        register_setting( 'seoplugin_advanced', 'seoplugin_noindex_archives' );
+        register_setting( 'seoplugin_advanced', 'seoplugin_remove_category_base' );
 
-        register_setting( 'seoplugin_advanced_group', 'seoplugin_noindex_tags', [
-            'sanitize_callback' => 'rest_sanitize_boolean',
-        ] );
-
-        register_setting( 'seoplugin_advanced_group', 'seoplugin_noindex_archives', [
-            'sanitize_callback' => 'rest_sanitize_boolean',
-        ] );
-
-        register_setting( 'seoplugin_advanced_group', 'seoplugin_remove_category_base', [
-            'sanitize_callback' => 'rest_sanitize_boolean',
-        ] );
-
-        register_setting( 'seoplugin_advanced_group', 'seoplugin_xml_sitemap_enabled', [
-            'sanitize_callback' => 'rest_sanitize_boolean',
-        ] );
-
-        register_setting( 'seoplugin_advanced_group', 'seoplugin_breadcrumbs_enabled', [
-            'sanitize_callback' => 'rest_sanitize_boolean',
-        ] );
-
-        // Webmaster Tools
-        register_setting( 'seoplugin_webmaster_group', 'seoplugin_google_verification', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_webmaster_group', 'seoplugin_bing_verification', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_webmaster_group', 'seoplugin_yandex_verification', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_webmaster_group', 'seoplugin_pinterest_verification', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_webmaster_group', 'seoplugin_google_analytics', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        register_setting( 'seoplugin_webmaster_group', 'seoplugin_google_tag_manager', [
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-
-        // General Settings Section
-        add_settings_section(
-            'seoplugin_general_section',
-            __( 'General SEO Settings', 'seoplugin' ),
-            null,
-            'seoplugin-settings'
-        );
-
-        add_settings_field(
-            'seoplugin_homepage_title',
-            __( 'Homepage Title', 'seoplugin' ),
-            [ $this, 'render_homepage_title_field' ],
-            'seoplugin-settings',
-            'seoplugin_general_section'
-        );
-
-        add_settings_field(
-            'seoplugin_homepage_description',
-            __( 'Homepage Meta Description', 'seoplugin' ),
-            [ $this, 'render_homepage_description_field' ],
-            'seoplugin-settings',
-            'seoplugin_general_section'
-        );
-
-        add_settings_field(
-            'seoplugin_default_meta_description',
-            __( 'Default Meta Description', 'seoplugin' ),
-            [ $this, 'render_default_meta_field' ],
-            'seoplugin-settings',
-            'seoplugin_general_section'
-        );
-
-        add_settings_field(
-            'seoplugin_separator',
-            __( 'Title Separator', 'seoplugin' ),
-            [ $this, 'render_separator_field' ],
-            'seoplugin-settings',
-            'seoplugin_general_section'
-        );
-
-        // Social Media Section
-        add_settings_section(
-            'seoplugin_social_section',
-            __( 'Social Media Settings', 'seoplugin' ),
-            [ $this, 'render_social_section_description' ],
-            'seoplugin-social'
-        );
-
-        add_settings_field(
-            'seoplugin_facebook_app_id',
-            __( 'Facebook App ID', 'seoplugin' ),
-            [ $this, 'render_facebook_app_id_field' ],
-            'seoplugin-social',
-            'seoplugin_social_section'
-        );
-
-        add_settings_field(
-            'seoplugin_twitter_username',
-            __( 'Twitter Username', 'seoplugin' ),
-            [ $this, 'render_twitter_username_field' ],
-            'seoplugin-social',
-            'seoplugin_social_section'
-        );
-
-        add_settings_field(
-            'seoplugin_default_og_image',
-            __( 'Default OG Image', 'seoplugin' ),
-            [ $this, 'render_default_og_image_field' ],
-            'seoplugin-social',
-            'seoplugin_social_section'
-        );
-
-        // AI Settings Section
-        add_settings_section(
-            'seoplugin_ai_section',
-            __( 'AI Assistant Settings', 'seoplugin' ),
-            [ $this, 'render_ai_section_description' ],
-            'seoplugin-ai'
-        );
-
-        add_settings_field(
-            'seoplugin_ai_enabled',
-            __( 'Enable AI Assistant', 'seoplugin' ),
-            [ $this, 'render_ai_enabled_field' ],
-            'seoplugin-ai',
-            'seoplugin_ai_section'
-        );
-
-        add_settings_field(
-            'seoplugin_ai_api_key',
-            __( 'Google Gemini API Key', 'seoplugin' ),
-            [ $this, 'render_ai_api_key_field' ],
-            'seoplugin-ai',
-            'seoplugin_ai_section'
-        );
-
-        // Advanced Settings Section
-        add_settings_section(
-            'seoplugin_advanced_section',
-            __( 'Advanced SEO Settings', 'seoplugin' ),
-            [ $this, 'render_advanced_section_description' ],
-            'seoplugin-advanced'
-        );
-
-        add_settings_field(
-            'seoplugin_xml_sitemap_enabled',
-            __( 'Enable XML Sitemap', 'seoplugin' ),
-            [ $this, 'render_xml_sitemap_field' ],
-            'seoplugin-advanced',
-            'seoplugin_advanced_section'
-        );
-
-        add_settings_field(
-            'seoplugin_breadcrumbs_enabled',
-            __( 'Enable Breadcrumbs', 'seoplugin' ),
-            [ $this, 'render_breadcrumbs_field' ],
-            'seoplugin-advanced',
-            'seoplugin_advanced_section'
-        );
-
-        add_settings_field(
-            'seoplugin_noindex_categories',
-            __( 'Noindex Category Pages', 'seoplugin' ),
-            [ $this, 'render_noindex_categories_field' ],
-            'seoplugin-advanced',
-            'seoplugin_advanced_section'
-        );
-
-        add_settings_field(
-            'seoplugin_noindex_tags',
-            __( 'Noindex Tag Pages', 'seoplugin' ),
-            [ $this, 'render_noindex_tags_field' ],
-            'seoplugin-advanced',
-            'seoplugin_advanced_section'
-        );
-
-        add_settings_field(
-            'seoplugin_noindex_archives',
-            __( 'Noindex Archive Pages', 'seoplugin' ),
-            [ $this, 'render_noindex_archives_field' ],
-            'seoplugin-advanced',
-            'seoplugin_advanced_section'
-        );
-
-        add_settings_field(
-            'seoplugin_remove_category_base',
-            __( 'Remove Category Base', 'seoplugin' ),
-            [ $this, 'render_remove_category_base_field' ],
-            'seoplugin-advanced',
-            'seoplugin_advanced_section'
-        );
-
-        // Webmaster Tools Section
-        add_settings_section(
-            'seoplugin_webmaster_section',
-            __( 'Webmaster Tools & Analytics', 'seoplugin' ),
-            [ $this, 'render_webmaster_section_description' ],
-            'seoplugin-webmaster'
-        );
-
-        add_settings_field(
-            'seoplugin_google_verification',
-            __( 'Google Search Console Verification', 'seoplugin' ),
-            [ $this, 'render_google_verification_field' ],
-            'seoplugin-webmaster',
-            'seoplugin_webmaster_section'
-        );
-
-        add_settings_field(
-            'seoplugin_bing_verification',
-            __( 'Bing Webmaster Verification', 'seoplugin' ),
-            [ $this, 'render_bing_verification_field' ],
-            'seoplugin-webmaster',
-            'seoplugin_webmaster_section'
-        );
-
-        add_settings_field(
-            'seoplugin_yandex_verification',
-            __( 'Yandex Webmaster Verification', 'seoplugin' ),
-            [ $this, 'render_yandex_verification_field' ],
-            'seoplugin-webmaster',
-            'seoplugin_webmaster_section'
-        );
-
-        add_settings_field(
-            'seoplugin_pinterest_verification',
-            __( 'Pinterest Verification', 'seoplugin' ),
-            [ $this, 'render_pinterest_verification_field' ],
-            'seoplugin-webmaster',
-            'seoplugin_webmaster_section'
-        );
-
-        add_settings_field(
-            'seoplugin_google_analytics',
-            __( 'Google Analytics Tracking ID', 'seoplugin' ),
-            [ $this, 'render_google_analytics_field' ],
-            'seoplugin-webmaster',
-            'seoplugin_webmaster_section'
-        );
-
-        add_settings_field(
-            'seoplugin_google_tag_manager',
-            __( 'Google Tag Manager ID', 'seoplugin' ),
-            [ $this, 'render_google_tag_manager_field' ],
-            'seoplugin-webmaster',
-            'seoplugin_webmaster_section'
-        );
+        // Webmaster Tools Settings
+        register_setting( 'seoplugin_webmaster', 'seoplugin_google_verification' );
+        register_setting( 'seoplugin_webmaster', 'seoplugin_bing_verification' );
+        register_setting( 'seoplugin_webmaster', 'seoplugin_yandex_verification' );
+        register_setting( 'seoplugin_webmaster', 'seoplugin_pinterest_verification' );
+        register_setting( 'seoplugin_webmaster', 'seoplugin_google_analytics' );
+        register_setting( 'seoplugin_webmaster', 'seoplugin_google_tag_manager' );
     }
 
     // Render settings page
     public function render_settings_page() {
-        $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'general';
+        $active_tab = isset( $_GET['tab'] ) ? $_GET['tab'] : 'general';
         ?>
         <div class="wrap">
-            <h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
+            <h1><?php _e( 'SEOPlugin Settings', 'seoplugin' ); ?></h1>
             
             <nav class="nav-tab-wrapper">
-                <a href="?page=seoplugin-settings&tab=general" class="nav-tab <?php echo $active_tab == 'general' ? 'nav-tab-active' : ''; ?>">
-                    <?php _e('General', 'seoplugin'); ?>
+                <a href="?page=seoplugin-settings&tab=general" class="nav-tab <?php echo $active_tab === 'general' ? 'nav-tab-active' : ''; ?>">
+                    <?php _e( 'General', 'seoplugin' ); ?>
                 </a>
-                <a href="?page=seoplugin-settings&tab=social" class="nav-tab <?php echo $active_tab == 'social' ? 'nav-tab-active' : ''; ?>">
-                    <?php _e('Social Media', 'seoplugin'); ?>
+                <a href="?page=seoplugin-settings&tab=social" class="nav-tab <?php echo $active_tab === 'social' ? 'nav-tab-active' : ''; ?>">
+                    <?php _e( 'Social Media', 'seoplugin' ); ?>
                 </a>
-                <a href="?page=seoplugin-settings&tab=ai" class="nav-tab <?php echo $active_tab == 'ai' ? 'nav-tab-active' : ''; ?>">
-                    <?php _e('AI Assistant', 'seoplugin'); ?>
+                <a href="?page=seoplugin-settings&tab=ai" class="nav-tab <?php echo $active_tab === 'ai' ? 'nav-tab-active' : ''; ?>">
+                    <?php _e( 'AI Assistant', 'seoplugin' ); ?>
                 </a>
-                <a href="?page=seoplugin-settings&tab=advanced" class="nav-tab <?php echo $active_tab == 'advanced' ? 'nav-tab-active' : ''; ?>">
-                    <?php _e('Advanced', 'seoplugin'); ?>
+                <a href="?page=seoplugin-settings&tab=advanced" class="nav-tab <?php echo $active_tab === 'advanced' ? 'nav-tab-active' : ''; ?>">
+                    <?php _e( 'Advanced', 'seoplugin' ); ?>
                 </a>
-                <a href="?page=seoplugin-settings&tab=webmaster" class="nav-tab <?php echo $active_tab == 'webmaster' ? 'nav-tab-active' : ''; ?>">
-                    <?php _e('Webmaster Tools', 'seoplugin'); ?>
+                <a href="?page=seoplugin-settings&tab=webmaster" class="nav-tab <?php echo $active_tab === 'webmaster' ? 'nav-tab-active' : ''; ?>">
+                    <?php _e( 'Webmaster Tools', 'seoplugin' ); ?>
                 </a>
             </nav>
 
             <div class="tab-content">
-                <?php if ($active_tab == 'general'): ?>
-                    <form action="options.php" method="post">
-                        <?php
-                        settings_fields( 'seoplugin_general_group' );
-                        do_settings_sections( 'seoplugin-settings' );
-                        submit_button();
-                        ?>
-                    </form>
-                <?php elseif ($active_tab == 'social'): ?>
-                    <form action="options.php" method="post">
-                        <?php
-                        settings_fields( 'seoplugin_social_group' );
-                        do_settings_sections( 'seoplugin-social' );
-                        submit_button();
-                        ?>
-                    </form>
-                <?php elseif ($active_tab == 'ai'): ?>
-                    <form action="options.php" method="post">
-                        <?php
-                        settings_fields( 'seoplugin_ai_group' );
-                        do_settings_sections( 'seoplugin-ai' );
-                        submit_button();
-                        ?>
-                    </form>
-                <?php elseif ($active_tab == 'advanced'): ?>
-                    <form action="options.php" method="post">
-                        <?php
-                        settings_fields( 'seoplugin_advanced_group' );
-                        do_settings_sections( 'seoplugin-advanced' );
-                        submit_button();
-                        ?>
-                    </form>
-                <?php elseif ($active_tab == 'webmaster'): ?>
-                    <form action="options.php" method="post">
-                        <?php
-                        settings_fields( 'seoplugin_webmaster_group' );
-                        do_settings_sections( 'seoplugin-webmaster' );
-                        submit_button();
-                        ?>
-                    </form>
-                <?php endif; ?>
+                <?php
+                switch ( $active_tab ) {
+                    case 'general':
+                        $this->render_general_settings();
+                        break;
+                    case 'social':
+                        $this->render_social_settings();
+                        break;
+                    case 'ai':
+                        $this->render_ai_settings();
+                        break;
+                    case 'advanced':
+                        $this->render_advanced_settings();
+                        break;
+                    case 'webmaster':
+                        $this->render_webmaster_settings();
+                        break;
+                }
+                ?>
             </div>
         </div>
-
-        <style>
-        .tab-content {
-            background: #fff;
-            padding: 20px;
-            border: 1px solid #ccd0d4;
-            border-top: none;
-            box-shadow: 0 1px 1px rgba(0,0,0,.04);
-        }
-        .form-table th {
-            width: 200px;
-        }
-        .seo-preview {
-            background: #f8f9fa;
-            border: 1px solid #e1e5e9;
-            border-radius: 4px;
-            padding: 15px;
-            margin-top: 10px;
-        }
-        .seo-preview-title {
-            color: #1a0dab;
-            font-size: 18px;
-            font-weight: 400;
-            text-decoration: none;
-            margin-bottom: 5px;
-        }
-        .seo-preview-url {
-            color: #006621;
-            font-size: 14px;
-            margin-bottom: 5px;
-        }
-        .seo-preview-description {
-            color: #545454;
-            font-size: 13px;
-            line-height: 1.4;
-        }
-        </style>
         <?php
     }
 
-    // Homepage title field
-    public function render_homepage_title_field() {
-        $setting = get_option( 'seoplugin_homepage_title', get_bloginfo('name') );
+    // Render general settings
+    private function render_general_settings() {
         ?>
-        <input type="text" name="seoplugin_homepage_title" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" />
-        <p class="description"><?php esc_html_e( 'Custom title for your homepage. Leave empty to use site title.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Homepage description field
-    public function render_homepage_description_field() {
-        $setting = get_option( 'seoplugin_homepage_description', get_bloginfo('description') );
-        ?>
-        <textarea name="seoplugin_homepage_description" rows="3" class="large-text"><?php echo esc_textarea( $setting ); ?></textarea>
-        <p class="description"><?php esc_html_e( 'Meta description for your homepage.', 'seoplugin' ); ?></p>
-        <div class="seo-preview">
-            <div class="seo-preview-title"><?php echo esc_html($setting ?: get_bloginfo('name')); ?></div>
-            <div class="seo-preview-url"><?php echo esc_url(home_url()); ?></div>
-            <div class="seo-preview-description"><?php echo esc_html($setting ?: get_bloginfo('description')); ?></div>
-        </div>
-        <?php
-    }
-
-    // Render default meta description field
-    public function render_default_meta_field() {
-        $setting = get_option( 'seoplugin_default_meta_description', '' );
-        ?>
-        <textarea name="seoplugin_default_meta_description" rows="3" class="large-text"><?php echo esc_textarea( $setting ); ?></textarea>
-        <p class="description"><?php esc_html_e( 'Default meta description for pages without custom SEO settings.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Title separator field
-    public function render_separator_field() {
-        $setting = get_option( 'seoplugin_separator', '|' );
-        $separators = [
-            '|' => '|',
-            '-' => '-',
-            '–' => '–',
-            '—' => '—',
-            '·' => '·',
-            '»' => '»',
-            '/' => '/',
-        ];
-        ?>
-        <select name="seoplugin_separator">
-            <?php foreach ($separators as $value => $label): ?>
-                <option value="<?php echo esc_attr($value); ?>" <?php selected($setting, $value); ?>>
-                    <?php echo esc_html($label); ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
-        <p class="description"><?php esc_html_e( 'Character used to separate page title from site name.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Social section description
-    public function render_social_section_description() {
-        echo '<p>' . __('Configure social media settings for better sharing and engagement.', 'seoplugin') . '</p>';
-    }
-
-    // Facebook App ID field
-    public function render_facebook_app_id_field() {
-        $setting = get_option( 'seoplugin_facebook_app_id', '' );
-        ?>
-        <input type="text" name="seoplugin_facebook_app_id" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" />
-        <p class="description"><?php esc_html_e( 'Facebook App ID for better social sharing analytics.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Twitter username field
-    public function render_twitter_username_field() {
-        $setting = get_option( 'seoplugin_twitter_username', '' );
-        ?>
-        <input type="text" name="seoplugin_twitter_username" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" placeholder="@username" />
-        <p class="description"><?php esc_html_e( 'Your Twitter username (including @) for Twitter Card attribution.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Default OG Image field
-    public function render_default_og_image_field() {
-        $setting = get_option( 'seoplugin_default_og_image', '' );
-        $image_url = '';
-        if ($setting) {
-            $image_url = wp_get_attachment_image_url($setting, 'medium');
-        }
-        ?>
-        <div class="default-og-image-container">
-            <input type="hidden" name="seoplugin_default_og_image" id="seoplugin_default_og_image" value="<?php echo esc_attr($setting); ?>" />
-            <div class="image-preview" id="default-og-preview">
-                <?php if ($image_url): ?>
-                    <img src="<?php echo esc_url($image_url); ?>" style="max-width: 300px; height: auto;" />
-                <?php endif; ?>
+        <form method="post" action="options.php">
+            <?php settings_fields( 'seoplugin_general' ); ?>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><?php _e( 'Homepage Title', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_homepage_title" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_homepage_title', get_bloginfo( 'name' ) ) ); ?>" />
+                        <p class="description"><?php _e( 'Custom title for your homepage in search results', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Homepage Description', 'seoplugin' ); ?></th>
+                    <td>
+                        <textarea name="seoplugin_homepage_description" class="large-text" rows="3"><?php echo esc_textarea( get_option( 'seoplugin_homepage_description', get_bloginfo( 'description' ) ) ); ?></textarea>
+                        <p class="description"><?php _e( 'Meta description for your homepage (recommended: 120-160 characters)', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Title Separator', 'seoplugin' ); ?></th>
+                    <td>
+                        <select name="seoplugin_separator">
+                            <?php
+                            $separators = [ '|' => '|', '-' => '-', '–' => '–', '—' => '—', '·' => '·', '»' => '»', '/' => '/' ];
+                            $current_separator = get_option( 'seoplugin_separator', '|' );
+                            foreach ( $separators as $value => $label ) {
+                                echo '<option value="' . esc_attr( $value ) . '" ' . selected( $current_separator, $value, false ) . '>' . esc_html( $label ) . '</option>';
+                            }
+                            ?>
+                        </select>
+                        <p class="description"><?php _e( 'Character used to separate page title from site name', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Default Meta Description', 'seoplugin' ); ?></th>
+                    <td>
+                        <textarea name="seoplugin_default_meta_description" class="large-text" rows="3"><?php echo esc_textarea( get_option( 'seoplugin_default_meta_description', 'Welcome to our site!' ) ); ?></textarea>
+                        <p class="description"><?php _e( 'Fallback meta description when none is specified', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Default Open Graph Image', 'seoplugin' ); ?></th>
+                    <td>
+                        <div class="default-og-image-container">
+                            <input type="hidden" id="seoplugin_default_og_image" name="seoplugin_default_og_image" 
+                                   value="<?php echo esc_attr( get_option( 'seoplugin_default_og_image' ) ); ?>" />
+                            <div class="image-preview" id="default-og-preview">
+                                <?php
+                                $default_og_image = get_option( 'seoplugin_default_og_image' );
+                                if ( $default_og_image ) {
+                                    $image_url = wp_get_attachment_image_url( $default_og_image, 'medium' );
+                                    if ( $image_url ) {
+                                        echo '<img src="' . esc_url( $image_url ) . '" alt="Default OG Image" />';
+                                    }
+                                } else {
+                                    echo '<p>' . __( 'No default image selected', 'seoplugin' ) . '</p>';
+                                }
+                                ?>
+                            </div>
+                            <button type="button" id="select-default-og-image" class="button">
+                                <?php _e( 'Select Default Image', 'seoplugin' ); ?>
+                            </button>
+                            <button type="button" id="remove-default-og-image" class="button" 
+                                    style="<?php echo $default_og_image ? '' : 'display:none;'; ?>">
+                                <?php _e( 'Remove Image', 'seoplugin' ); ?>
+                            </button>
+                        </div>
+                        <p class="description"><?php _e( 'Default image for social media sharing when no specific image is set (recommended: 1200x630px)', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+            </table>
+            
+            <div class="seo-preview">
+                <h3><?php _e( 'Homepage SEO Preview', 'seoplugin' ); ?></h3>
+                <div class="seo-preview-title" id="homepage-preview-title">
+                    <?php echo esc_html( get_option( 'seoplugin_homepage_title', get_bloginfo( 'name' ) ) ); ?>
+                </div>
+                <div class="seo-preview-url">
+                    <?php echo esc_url( home_url() ); ?>
+                </div>
+                <div class="seo-preview-description" id="homepage-preview-description">
+                    <?php echo esc_html( get_option( 'seoplugin_homepage_description', get_bloginfo( 'description' ) ) ); ?>
+                </div>
             </div>
-            <button type="button" class="button" id="select-default-og-image">
-                <?php _e('Select Default OG Image', 'seoplugin'); ?>
-            </button>
-            <?php if ($setting): ?>
-                <button type="button" class="button" id="remove-default-og-image">
-                    <?php _e('Remove Image', 'seoplugin'); ?>
-                </button>
-            <?php endif; ?>
-        </div>
-        <p class="description"><?php esc_html_e( 'Default Open Graph image used when no specific image is set for a page.', 'seoplugin' ); ?></p>
-        
+            
+            <?php submit_button(); ?>
+        </form>
+
         <script>
         jQuery(document).ready(function($) {
-            $('#select-default-og-image').click(function(e) {
+            // Update preview on input
+            $('input[name="seoplugin_homepage_title"]').on('input', function() {
+                $('#homepage-preview-title').text($(this).val() || '<?php echo esc_js( get_bloginfo( 'name' ) ); ?>');
+            });
+            
+            $('textarea[name="seoplugin_homepage_description"]').on('input', function() {
+                $('#homepage-preview-description').text($(this).val() || '<?php echo esc_js( get_bloginfo( 'description' ) ); ?>');
+            });
+            
+            // Default OG Image selector
+            $('#select-default-og-image').on('click', function(e) {
                 e.preventDefault();
-                var frame = wp.media({
-                    title: 'Select Default OG Image',
+                
+                const frame = wp.media({
+                    title: 'Select Default Open Graph Image',
                     button: { text: 'Use This Image' },
-                    multiple: false
+                    multiple: false,
+                    library: { type: 'image' }
                 });
+                
                 frame.on('select', function() {
-                    var attachment = frame.state().get('selection').first().toJSON();
+                    const attachment = frame.state().get('selection').first().toJSON();
                     $('#seoplugin_default_og_image').val(attachment.id);
-                    $('#default-og-preview').html('<img src="' + attachment.url + '" style="max-width: 300px; height: auto;" />');
+                    $('#default-og-preview').html('<img src="' + attachment.url + '" alt="Default OG Image" />');
+                    $('#remove-default-og-image').show();
                 });
+                
                 frame.open();
             });
             
-            $('#remove-default-og-image').click(function(e) {
+            $('#remove-default-og-image').on('click', function(e) {
                 e.preventDefault();
                 $('#seoplugin_default_og_image').val('');
-                $('#default-og-preview').empty();
+                $('#default-og-preview').html('<p><?php echo esc_js( __( 'No default image selected', 'seoplugin' ) ); ?></p>');
                 $(this).hide();
             });
         });
@@ -580,1018 +952,431 @@ class SEOPlugin_Admin {
         <?php
     }
 
-    // AI section description
-    public function render_ai_section_description() {
-        echo '<p>' . __('Configure AI-powered SEO assistance using Google Gemini API.', 'seoplugin') . '</p>';
-    }
-
-    // AI enabled field
-    public function render_ai_enabled_field() {
-        $setting = get_option( 'seoplugin_ai_enabled', true );
+    // Render social settings
+    private function render_social_settings() {
         ?>
-        <label>
-            <input type="checkbox" name="seoplugin_ai_enabled" value="1" <?php checked($setting, 1); ?> />
-            <?php _e('Enable AI-powered SEO suggestions', 'seoplugin'); ?>
-        </label>
-        <p class="description"><?php esc_html_e( 'Enable or disable AI assistant features in the post editor.', 'seoplugin' ); ?></p>
+        <form method="post" action="options.php">
+            <?php settings_fields( 'seoplugin_social' ); ?>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><?php _e( 'Facebook App ID', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_facebook_app_id" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_facebook_app_id' ) ); ?>" />
+                        <p class="description">
+                            <?php _e( 'Facebook App ID for enhanced social sharing', 'seoplugin' ); ?>
+                            <a href="https://developers.facebook.com/apps/" target="_blank"><?php _e( 'Get your App ID', 'seoplugin' ); ?></a>
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'X (Twitter) Username', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_x_username" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_x_username', get_option( 'seoplugin_twitter_username' ) ) ); ?>" 
+                               placeholder="@username" />
+                        <p class="description"><?php _e( 'Your X (formerly Twitter) username for Twitter Card attribution', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'LinkedIn Company ID', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_linkedin_company_id" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_linkedin_company_id' ) ); ?>" />
+                        <p class="description"><?php _e( 'LinkedIn Company ID for enhanced LinkedIn sharing', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Instagram Username', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_instagram_username" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_instagram_username' ) ); ?>" 
+                               placeholder="@username" />
+                        <p class="description"><?php _e( 'Your Instagram username for social media integration', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'YouTube Channel URL', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="url" name="seoplugin_youtube_channel" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_youtube_channel' ) ); ?>" 
+                               placeholder="https://www.youtube.com/channel/..." />
+                        <p class="description"><?php _e( 'Full URL to your YouTube channel', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'TikTok Username', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_tiktok_username" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_tiktok_username' ) ); ?>" 
+                               placeholder="@username" />
+                        <p class="description"><?php _e( 'Your TikTok username for social media integration', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+            </table>
+            <?php submit_button(); ?>
+        </form>
         <?php
     }
 
-    // Render AI API key field
-    public function render_ai_api_key_field() {
-        $setting = get_option( 'seoplugin_ai_api_key', '' );
+    // Render AI settings
+    private function render_ai_settings() {
         ?>
-        <input type="password" name="seoplugin_ai_api_key" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" />
-        <p class="description">
-            <?php printf(
-                __('Enter your Google Gemini API key for AI-powered SEO suggestions. Get your key from <a href="%s" target="_blank">Google AI Studio</a>.', 'seoplugin'),
-                'https://makersuite.google.com/app/apikey'
-            ); ?>
-        </p>
+        <form method="post" action="options.php">
+            <?php settings_fields( 'seoplugin_ai' ); ?>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><?php _e( 'Enable AI Assistant', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="checkbox" name="seoplugin_ai_enabled" value="1" 
+                               <?php checked( get_option( 'seoplugin_ai_enabled', false ) ); ?> />
+                        <p class="description"><?php _e( 'Enable AI-powered SEO suggestions and content analysis', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Google Gemini API Key', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="password" name="seoplugin_gemini_api_key" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_gemini_api_key' ) ); ?>" />
+                        <p class="description">
+                            <?php _e( 'API key for Google Gemini AI service', 'seoplugin' ); ?>
+                            <br><a href="https://makersuite.google.com/app/apikey" target="_blank"><?php _e( 'Get your API key from Google AI Studio', 'seoplugin' ); ?></a>
+                        </p>
+                    </td>
+                </tr>
+            </table>
+            <?php submit_button(); ?>
+        </form>
         <?php
     }
 
-    // Advanced section description
-    public function render_advanced_section_description() {
-        echo '<p>' . __('Advanced SEO settings for fine-tuning your site optimization.', 'seoplugin') . '</p>';
-    }
-
-    // XML Sitemap field
-    public function render_xml_sitemap_field() {
-        $setting = get_option( 'seoplugin_xml_sitemap_enabled', true );
+    // Render advanced settings
+    private function render_advanced_settings() {
         ?>
-        <label>
-            <input type="checkbox" name="seoplugin_xml_sitemap_enabled" value="1" <?php checked($setting, 1); ?> />
-            <?php _e('Generate XML sitemap', 'seoplugin'); ?>
-        </label>
-        <p class="description">
-            <?php printf(
-                __('Automatically generate XML sitemap at <a href="%s" target="_blank">%s</a>', 'seoplugin'),
-                home_url('/sitemap.xml'),
-                home_url('/sitemap.xml')
-            ); ?>
-        </p>
+        <form method="post" action="options.php">
+            <?php settings_fields( 'seoplugin_advanced' ); ?>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><?php _e( 'XML Sitemap', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="checkbox" name="seoplugin_xml_sitemap_enabled" value="1" 
+                               <?php checked( get_option( 'seoplugin_xml_sitemap_enabled', true ) ); ?> />
+                        <label><?php _e( 'Enable XML sitemap generation', 'seoplugin' ); ?></label>
+                        <p class="description">
+                            <?php _e( 'Automatically generate XML sitemap for search engines', 'seoplugin' ); ?>
+                            <br><?php _e( 'Sitemap URL:', 'seoplugin' ); ?> <a href="<?php echo home_url( '/sitemap.xml' ); ?>" target="_blank"><?php echo home_url( '/sitemap.xml' ); ?></a>
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Breadcrumbs', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="checkbox" name="seoplugin_breadcrumbs_enabled" value="1" 
+                               <?php checked( get_option( 'seoplugin_breadcrumbs_enabled', true ) ); ?> />
+                        <label><?php _e( 'Enable breadcrumb navigation', 'seoplugin' ); ?></label>
+                        <p class="description">
+                            <?php _e( 'Use shortcode [seoplugin_breadcrumbs] to display breadcrumbs', 'seoplugin' ); ?>
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Noindex Settings', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="checkbox" name="seoplugin_noindex_categories" value="1" 
+                               <?php checked( get_option( 'seoplugin_noindex_categories', false ) ); ?> />
+                        <label><?php _e( 'Noindex category pages', 'seoplugin' ); ?></label><br>
+                        
+                        <input type="checkbox" name="seoplugin_noindex_tags" value="1" 
+                               <?php checked( get_option( 'seoplugin_noindex_tags', false ) ); ?> />
+                        <label><?php _e( 'Noindex tag pages', 'seoplugin' ); ?></label><br>
+                        
+                        <input type="checkbox" name="seoplugin_noindex_archives" value="1" 
+                               <?php checked( get_option( 'seoplugin_noindex_archives', false ) ); ?> />
+                        <label><?php _e( 'Noindex date and author archives', 'seoplugin' ); ?></label>
+                        
+                        <p class="description"><?php _e( 'Prevent search engines from indexing these page types', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'URL Structure', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="checkbox" name="seoplugin_remove_category_base" value="1" 
+                               <?php checked( get_option( 'seoplugin_remove_category_base', false ) ); ?> />
+                        <label><?php _e( 'Remove /category/ from category URLs', 'seoplugin' ); ?></label>
+                        <p class="description"><?php _e( 'Makes category URLs cleaner (requires permalink flush)', 'seoplugin' ); ?></p>
+                    </td>
+                </tr>
+            </table>
+            <?php submit_button(); ?>
+        </form>
         <?php
     }
 
-    // Breadcrumbs field
-    public function render_breadcrumbs_field() {
-        $setting = get_option( 'seoplugin_breadcrumbs_enabled', true );
+    // Render webmaster settings
+    private function render_webmaster_settings() {
         ?>
-        <label>
-            <input type="checkbox" name="seoplugin_breadcrumbs_enabled" value="1" <?php checked($setting, 1); ?> />
-            <?php _e('Enable breadcrumbs functionality', 'seoplugin'); ?>
-        </label>
-        <p class="description"><?php esc_html_e( 'Use [seoplugin_breadcrumbs] shortcode to display breadcrumbs.', 'seoplugin' ); ?></p>
+        <form method="post" action="options.php">
+            <?php settings_fields( 'seoplugin_webmaster' ); ?>
+            <table class="form-table">
+                <h3><?php _e( 'Search Engine Verification', 'seoplugin' ); ?></h3>
+                <tr>
+                    <th scope="row"><?php _e( 'Google Search Console', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_google_verification" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_google_verification' ) ); ?>" />
+                        <p class="description">
+                            <?php _e( 'Google verification meta tag content', 'seoplugin' ); ?>
+                            <br><a href="https://search.google.com/search-console" target="_blank"><?php _e( 'Get verification code', 'seoplugin' ); ?></a>
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Bing Webmaster Tools', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_bing_verification" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_bing_verification' ) ); ?>" />
+                        <p class="description">
+                            <?php _e( 'Bing verification meta tag content', 'seoplugin' ); ?>
+                            <br><a href="https://www.bing.com/webmasters" target="_blank"><?php _e( 'Get verification code', 'seoplugin' ); ?></a>
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Yandex Webmaster', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_yandex_verification" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_yandex_verification' ) ); ?>" />
+                        <p class="description">
+                            <?php _e( 'Yandex verification meta tag content', 'seoplugin' ); ?>
+                            <br><a href="https://webmaster.yandex.com/" target="_blank"><?php _e( 'Get verification code', 'seoplugin' ); ?></a>
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Pinterest', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_pinterest_verification" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_pinterest_verification' ) ); ?>" />
+                        <p class="description">
+                            <?php _e( 'Pinterest verification meta tag content', 'seoplugin' ); ?>
+                            <br><a href="https://analytics.pinterest.com/" target="_blank"><?php _e( 'Get verification code', 'seoplugin' ); ?></a>
+                        </p>
+                    </td>
+                </tr>
+                
+                <h3><?php _e( 'Analytics & Tracking', 'seoplugin' ); ?></h3>
+                <tr>
+                    <th scope="row"><?php _e( 'Google Analytics', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_google_analytics" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_google_analytics' ) ); ?>" 
+                               placeholder="G-XXXXXXXXXX or UA-XXXXXXXX-X" />
+                        <p class="description">
+                            <?php _e( 'Google Analytics tracking ID (GA4 or Universal Analytics)', 'seoplugin' ); ?>
+                            <br><a href="https://analytics.google.com/" target="_blank"><?php _e( 'Get tracking ID', 'seoplugin' ); ?></a>
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php _e( 'Google Tag Manager', 'seoplugin' ); ?></th>
+                    <td>
+                        <input type="text" name="seoplugin_google_tag_manager" class="regular-text" 
+                               value="<?php echo esc_attr( get_option( 'seoplugin_google_tag_manager' ) ); ?>" 
+                               placeholder="GTM-XXXXXXX" />
+                        <p class="description">
+                            <?php _e( 'Google Tag Manager container ID (takes priority over Google Analytics)', 'seoplugin' ); ?>
+                            <br><a href="https://tagmanager.google.com/" target="_blank"><?php _e( 'Get container ID', 'seoplugin' ); ?></a>
+                        </p>
+                    </td>
+                </tr>
+            </table>
+            <?php submit_button(); ?>
+        </form>
         <?php
     }
 
-    // Noindex categories field
-    public function render_noindex_categories_field() {
-        $setting = get_option( 'seoplugin_noindex_categories', false );
-        ?>
-        <label>
-            <input type="checkbox" name="seoplugin_noindex_categories" value="1" <?php checked($setting, 1); ?> />
-            <?php _e('Add noindex to category pages', 'seoplugin'); ?>
-        </label>
-        <p class="description"><?php esc_html_e( 'Prevent search engines from indexing category archive pages.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Noindex tags field
-    public function render_noindex_tags_field() {
-        $setting = get_option( 'seoplugin_noindex_tags', false );
-        ?>
-        <label>
-            <input type="checkbox" name="seoplugin_noindex_tags" value="1" <?php checked($setting, 1); ?> />
-            <?php _e('Add noindex to tag pages', 'seoplugin'); ?>
-        </label>
-        <p class="description"><?php esc_html_e( 'Prevent search engines from indexing tag archive pages.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Noindex archives field
-    public function render_noindex_archives_field() {
-        $setting = get_option( 'seoplugin_noindex_archives', false );
-        ?>
-        <label>
-            <input type="checkbox" name="seoplugin_noindex_archives" value="1" <?php checked($setting, 1); ?> />
-            <?php _e('Add noindex to date/author archives', 'seoplugin'); ?>
-        </label>
-        <p class="description"><?php esc_html_e( 'Prevent search engines from indexing date and author archive pages.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Remove category base field
-    public function render_remove_category_base_field() {
-        $setting = get_option( 'seoplugin_remove_category_base', false );
-        ?>
-        <label>
-            <input type="checkbox" name="seoplugin_remove_category_base" value="1" <?php checked($setting, 1); ?> />
-            <?php _e('Remove /category/ from URLs', 'seoplugin'); ?>
-        </label>
-        <p class="description"><?php esc_html_e( 'Remove the category base from category URLs for cleaner permalinks.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Webmaster section description
-    public function render_webmaster_section_description() {
-        echo '<p>' . __('Connect your site with webmaster tools and analytics services.', 'seoplugin') . '</p>';
-    }
-
-    // Google verification field
-    public function render_google_verification_field() {
-        $setting = get_option( 'seoplugin_google_verification', '' );
-        ?>
-        <input type="text" name="seoplugin_google_verification" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" placeholder="google1234567890abcdef.html" />
-        <p class="description"><?php esc_html_e( 'Google Search Console verification meta tag content.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Bing verification field
-    public function render_bing_verification_field() {
-        $setting = get_option( 'seoplugin_bing_verification', '' );
-        ?>
-        <input type="text" name="seoplugin_bing_verification" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" />
-        <p class="description"><?php esc_html_e( 'Bing Webmaster Tools verification meta tag content.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Yandex verification field
-    public function render_yandex_verification_field() {
-        $setting = get_option( 'seoplugin_yandex_verification', '' );
-        ?>
-        <input type="text" name="seoplugin_yandex_verification" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" />
-        <p class="description"><?php esc_html_e( 'Yandex Webmaster verification meta tag content.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Pinterest verification field
-    public function render_pinterest_verification_field() {
-        $setting = get_option( 'seoplugin_pinterest_verification', '' );
-        ?>
-        <input type="text" name="seoplugin_pinterest_verification" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" />
-        <p class="description"><?php esc_html_e( 'Pinterest site verification meta tag content.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Google Analytics field
-    public function render_google_analytics_field() {
-        $setting = get_option( 'seoplugin_google_analytics', '' );
-        ?>
-        <input type="text" name="seoplugin_google_analytics" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" placeholder="G-XXXXXXXXXX or UA-XXXXXXXX-X" />
-        <p class="description"><?php esc_html_e( 'Google Analytics tracking ID (GA4 or Universal Analytics).', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Google Tag Manager field
-    public function render_google_tag_manager_field() {
-        $setting = get_option( 'seoplugin_google_tag_manager', '' );
-        ?>
-        <input type="text" name="seoplugin_google_tag_manager" value="<?php echo esc_attr( $setting ); ?>" class="regular-text" placeholder="GTM-XXXXXXX" />
-        <p class="description"><?php esc_html_e( 'Google Tag Manager container ID.', 'seoplugin' ); ?></p>
-        <?php
-    }
-
-    // Add meta box for posts/pages
-    public function add_meta_box() {
-        $post_types = get_post_types(['public' => true], 'names');
-        foreach ($post_types as $post_type) {
-        add_meta_box(
-            'seoplugin_meta_box',
-            __( 'SEO Settings', 'seoplugin' ),
-            [ $this, 'render_meta_box' ],
-                $post_type,
-            'normal',
-            'high'
-        );
-        }
-    }
-
-    // Render meta box
-    public function render_meta_box( $post ) {
-        $title = get_post_meta($post->ID, '_seoplugin_meta_title', true) ?: get_the_title($post->ID);
-        $description = get_post_meta($post->ID, '_seoplugin_meta_description', true) ?: get_the_title($post->ID);
-        $og_image_id = get_post_meta($post->ID, '_seoplugin_og_image_id', true);
-        wp_nonce_field('seoplugin_meta_box', 'seoplugin_meta_box_nonce');
+    // AJAX handlers
+    public function ajax_regen_og_custom() {
+        check_ajax_referer( 'seoplugin_nonce', 'nonce' );
         
-        // Load custom image size og_custom
-        if (is_numeric($og_image_id)) {
-            $og_img = wp_get_attachment_image_src($og_image_id, 'og_custom');
-            $og_image_url = !empty($og_img) ? $og_img[0] : '';
-        } else {
-            $og_image_url = esc_url($og_image_id);
+        $attachment_id = intval( $_POST['attachment_id'] );
+        if ( ! $attachment_id ) {
+            wp_send_json_error( 'Invalid attachment ID' );
         }
-?>
-<div class="seoplugin_eseo">
-    <div style="margin-top: 12px;"><strong class="control-label">Search Appearance</strong></div>
-    <div class="google-view">
-        <div class="google-wrap-content">
-            <div class="header-logo">
-                <div class="divddercolunm">
-                    <div class="google-logo"><?php if (!empty(get_site_icon_url())) : ?><img class="logo" src="<?=get_site_icon_url()?>"/><?php endif; ?></div>
-                    <div class="google-site">
-                        <span class="google-site-domain"><?=get_bloginfo('name')?></span><br>
-                        <span class="site-down-color"><?=do_shortcode('[site_domain_url]');?></span>
-                    </div>
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#70757a" style="width: 18px;margin-top: -30px;"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"></path></svg>
-                </div>
-            </div>
-            <div class="wrp-google-title"><div class="google-title"><span class="google-title3"><?=esc_attr($title)?></span></div></div>
-            <div class="wrp-google-decription"><span class="site-down-color"><?=date('M d, Y')?> - </span><?=esc_textarea($description)?></div>
-        </div>
-    </div>
-    <p>
-        <label for="seoplugin_meta_title"><strong class="control-label">SEO Page Title <span id="seoTitleCharCount">0</span>/65</strong></label><br>
-        <input class="frmtxt" type="text" name="seoplugin_meta_title" id="seoplugin_meta_title" value="<?php echo esc_attr($title); ?>" maxlength="65" style="width:100%;" />
-    </p>
-    <p>
-        <label for="seoplugin_meta_description"><strong class="control-label">Meta Description <span id="seoDescriptionCharCount">0</span>/160</strong></label><br>
-        <textarea class="frmtxt" name="seoplugin_meta_description" id="seoplugin_meta_description" rows="4" maxlength="160" style="width:100%;"><?php echo esc_textarea($description); ?></textarea>
-    </p>
-    <p>
-        <label for="seoplugin_og_image_button"><strong class="control-label">OG Image</strong></label><br>
-        <input type="hidden" name="seoplugin_og_image_id" id="seoplugin_og_image_id" value="<?php echo esc_attr($og_image_id); ?>" />
-        <span class="seoplugin_og_image_preview" id="seoplugin_og_image_preview">
-            <?php if (!empty($og_image_url)) : ?>
-                <img src="<?php echo esc_url($og_image_url); ?>" alt="OG images" style="width:527px; height:352px; object-fit:cover;" />
-            <?php endif; ?>
-        </span>
-        <span class="wrp-contact-social">
-            <span class="site-domain"><?=do_shortcode('[site_domain_url]');?></span>
-            <span class="socail-title"><?=esc_attr($title);?></span>
-            <span class="socail-description"><?=esc_textarea($description);?></span>
-        </span>
-        <button type="button" class="button" id="seoplugin_og_image_button">Select OG Image</button>
-    </p>
-    
-    <!-- SEO Analysis Section -->
-    <div class="seo-analysis-section">
-        <h3><strong class="control-label">SEO Analysis</strong></h3>
-        <div class="seo-score-container">
-            <div class="seo-score-circle">
-                <span id="seo-score">0</span>
-                <small>Score</small>
-            </div>
-            <div class="seo-analysis-details">
-                <div class="seo-item" id="title-analysis">
-                    <span class="seo-icon">📝</span>
-                    <span class="seo-text">Title Length</span>
-                    <span class="seo-status" id="title-status">-</span>
-                </div>
-                <div class="seo-item" id="desc-analysis">
-                    <span class="seo-icon">📄</span>
-                    <span class="seo-text">Description Length</span>
-                    <span class="seo-status" id="desc-status">-</span>
-                </div>
-                <div class="seo-item" id="image-analysis">
-                    <span class="seo-icon">🖼️</span>
-                    <span class="seo-text">OG Image</span>
-                    <span class="seo-status" id="image-status">-</span>
-                </div>
-                <div class="seo-item" id="keyword-analysis">
-                    <span class="seo-icon">🔍</span>
-                    <span class="seo-text">Keyword Density</span>
-                    <span class="seo-status" id="keyword-status">-</span>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Social Media Previews -->
-    <div class="social-previews">
-        <h3><strong class="control-label">Social Media Previews</strong></h3>
-        <div class="social-tabs">
-            <button class="social-tab active" data-tab="facebook">Facebook</button>
-            <button class="social-tab" data-tab="x">X (Twitter)</button>
-        </div>
         
-        <div class="social-preview-content">
-            <div class="social-preview facebook-preview active" id="facebook-preview">
-                <div class="social-card">
-                    <div class="social-image">
-                        <?php if (!empty($og_image_url)) : ?>
-                            <img src="<?php echo esc_url($og_image_url); ?>" alt="Social preview" />
-                        <?php else : ?>
-                            <div class="no-image">No image selected</div>
-                        <?php endif; ?>
-                    </div>
-                    <div class="social-content">
-                        <div class="social-url"><?=do_shortcode('[site_domain_url]');?></div>
-                        <div class="social-title"><?=esc_attr($title);?></div>
-                        <div class="social-description"><?=esc_textarea($description);?></div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="social-preview twitter-preview" id="x-preview">
-                <div class="x-card">
-                    <div class="x-image">
-                        <?php if (!empty($og_image_url)) : ?>
-                            <img src="<?php echo esc_url($og_image_url); ?>" alt="Twitter preview" />
-                        <?php else : ?>
-                            <div class="no-image">No image selected</div>
-                        <?php endif; ?>
-                    </div>
-                    <div class="x-content">
-                        <div class="x-title"><?=esc_attr($title);?></div>
-                        <div class="x-description"><?=esc_textarea($description);?></div>
-                        <div class="x-url"><?=do_shortcode('[site_domain_url]');?></div>
-                    </div>
-                </div>
-            </div>
-            
-        </div>
-    </div>
-
-    <!-- AI-Powered SEO Assistant -->
-    <div class="ai-seo-assistant">
-        <h3><strong class="control-label">🤖 AI SEO Assistant</strong></h3>
-        <div class="ai-controls">
-            <button type="button" class="button button-primary" id="ai-generate-title">Generate Title</button>
-            <button type="button" class="button button-primary" id="ai-generate-description">Generate Description</button>
-            <button type="button" class="button button-secondary" id="ai-suggest-keywords">Suggest Keywords</button>
-            <button type="button" class="button button-secondary" id="ai-analyze-content">Analyze Content</button>
-        </div>
-        <div class="ai-suggestions" id="ai-suggestions" style="display: none;">
-            <h4>AI Suggestions:</h4>
-            <div class="ai-suggestion-content" id="ai-suggestion-content"></div>
-        </div>
-        <div class="ai-loading" id="ai-loading" style="display: none;">
-            <div class="spinner"></div>
-            <span>AI is working...</span>
-        </div>
-    </div>
-
-    <!-- Advanced SEO Options -->
-    <div class="advanced-seo-options">
-        <h3><strong class="control-label">Advanced SEO Options</strong></h3>
+        $image_url = wp_get_attachment_image_url( $attachment_id, 'full' );
+        if ( ! $image_url ) {
+            wp_send_json_error( 'Could not get image URL' );
+        }
         
-        <p>
-            <label for="seoplugin_focus_keyword"><strong class="control-label">Focus Keyword</strong></label><br>
-            <input class="frmtxt" type="text" name="seoplugin_focus_keyword" id="seoplugin_focus_keyword" value="<?php echo esc_attr(get_post_meta($post->ID, '_seoplugin_focus_keyword', true)); ?>" placeholder="Enter your main keyword" style="width:100%;" />
-            <small class="description">The main keyword you want to rank for</small>
-        </p>
-
-        <p>
-            <label for="seoplugin_robots_meta"><strong class="control-label">Robots Meta</strong></label><br>
-            <select class="frmtxt" name="seoplugin_robots_meta" id="seoplugin_robots_meta" style="width:100%;">
-                <option value="">Default</option>
-                <option value="index,follow" <?php selected(get_post_meta($post->ID, '_seoplugin_robots_meta', true), 'index,follow'); ?>>Index, Follow</option>
-                <option value="noindex,follow" <?php selected(get_post_meta($post->ID, '_seoplugin_robots_meta', true), 'noindex,follow'); ?>>No Index, Follow</option>
-                <option value="index,nofollow" <?php selected(get_post_meta($post->ID, '_seoplugin_robots_meta', true), 'index,nofollow'); ?>>Index, No Follow</option>
-                <option value="noindex,nofollow" <?php selected(get_post_meta($post->ID, '_seoplugin_robots_meta', true), 'noindex,nofollow'); ?>>No Index, No Follow</option>
-            </select>
-        </p>
-
-        <p>
-            <label for="seoplugin_canonical_url"><strong class="control-label">Canonical URL</strong></label><br>
-            <input class="frmtxt" type="url" name="seoplugin_canonical_url" id="seoplugin_canonical_url" value="<?php echo esc_attr(get_post_meta($post->ID, '_seoplugin_canonical_url', true)); ?>" placeholder="https://example.com/canonical-page" style="width:100%;" />
-            <small class="description">Override the canonical URL for this page</small>
-        </p>
-
-        <p>
-            <label for="seoplugin_schema_type"><strong class="control-label">Schema Type</strong></label><br>
-            <select class="frmtxt" name="seoplugin_schema_type" id="seoplugin_schema_type" style="width:100%;">
-                <option value="Article" <?php selected(get_post_meta($post->ID, '_seoplugin_schema_type', true), 'Article'); ?>>Article</option>
-                <option value="BlogPosting" <?php selected(get_post_meta($post->ID, '_seoplugin_schema_type', true), 'BlogPosting'); ?>>Blog Post</option>
-                <option value="WebPage" <?php selected(get_post_meta($post->ID, '_seoplugin_schema_type', true), 'WebPage'); ?>>Web Page</option>
-                <option value="Product" <?php selected(get_post_meta($post->ID, '_seoplugin_schema_type', true), 'Product'); ?>>Product</option>
-                <option value="Event" <?php selected(get_post_meta($post->ID, '_seoplugin_schema_type', true), 'Event'); ?>>Event</option>
-                <option value="Recipe" <?php selected(get_post_meta($post->ID, '_seoplugin_schema_type', true), 'Recipe'); ?>>Recipe</option>
-                <option value="Review" <?php selected(get_post_meta($post->ID, '_seoplugin_schema_type', true), 'Review'); ?>>Review</option>
-            </select>
-        </p>
-
-        <p>
-            <label for="seoplugin_meta_keywords"><strong class="control-label">Meta Keywords (comma separated)</strong></label><br>
-            <input class="frmtxt" type="text" name="seoplugin_meta_keywords" id="seoplugin_meta_keywords" value="<?php echo esc_attr(get_post_meta($post->ID, '_seoplugin_meta_keywords', true)); ?>" placeholder="keyword1, keyword2, keyword3" style="width:100%;" />
-            <small class="description">Separate keywords with commas</small>
-        </p>
-    </div>
-</div>
-        <?php
+        wp_send_json_success( [ 'url' => $image_url ] );
     }
 
-    // Save meta box data
-    public function save_meta_box( $post_id ) {
-        if ( ! isset( $_POST['seoplugin_meta_box_nonce'] ) || ! wp_verify_nonce( $_POST['seoplugin_meta_box_nonce'], 'seoplugin_meta_box' ) ) {
-            return;
-        }
-
-        if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
-            return;
-        }
-
-        if ( ! current_user_can( 'edit_post', $post_id ) ) {
-            return;
-        }
-
-        if (isset($_POST['seoplugin_og_image_id'])) {
-            update_post_meta($post_id, '_seoplugin_og_image_id', absint($_POST['seoplugin_og_image_id']));
-        }
-
-        if (isset($_POST['seoplugin_meta_title'])) {
-            update_post_meta($post_id, '_seoplugin_meta_title', sanitize_text_field($_POST['seoplugin_meta_title']));
-        }
-
-        if (isset($_POST['seoplugin_meta_description'])) {
-            update_post_meta($post_id, '_seoplugin_meta_description', sanitize_textarea_field($_POST['seoplugin_meta_description']));
-        }
-
-        if (isset($_POST['seoplugin_focus_keyword'])) {
-            update_post_meta($post_id, '_seoplugin_focus_keyword', sanitize_text_field($_POST['seoplugin_focus_keyword']));
-        }
-
-        if (isset($_POST['seoplugin_robots_meta'])) {
-            update_post_meta($post_id, '_seoplugin_robots_meta', sanitize_text_field($_POST['seoplugin_robots_meta']));
-        }
-
-        if (isset($_POST['seoplugin_canonical_url'])) {
-            update_post_meta($post_id, '_seoplugin_canonical_url', esc_url_raw($_POST['seoplugin_canonical_url']));
-        }
-
-        if (isset($_POST['seoplugin_schema_type'])) {
-            update_post_meta($post_id, '_seoplugin_schema_type', sanitize_text_field($_POST['seoplugin_schema_type']));
-        }
-
-        if (isset($_POST['seoplugin_meta_keywords'])) {
-            update_post_meta($post_id, '_seoplugin_meta_keywords', sanitize_text_field($_POST['seoplugin_meta_keywords']));
-        }
-    }
-
-    // Enqueue admin scripts and styles
-    public function enqueue_admin_scripts($hook) {
-        if (in_array($hook, ['post.php', 'post-new.php', 'settings_page_seoplugin-settings'])) {
-            wp_enqueue_media();
-            wp_enqueue_script('seoplugin-admin-meta', SEOPLUGIN_URL . 'assets/js/seoplugin.js', ['jquery'], SEOPLUGIN_VERSION, true);
-            wp_enqueue_style('seoplugin-admin-meta-css', SEOPLUGIN_URL . 'assets/css/seoplugin.css', array(), SEOPLUGIN_VERSION);
-            wp_localize_script('seoplugin-admin-meta', 'seoplugin_ajax', ['ajax_url' => admin_url('admin-ajax.php')]);
-        }
-    }
-
-    // Register custom image sizes
-    public function register_image_sizes() {
-        add_image_size('og_custom', 1024, 683, true);
-    }
-
-    // AJAX handler to generate og_custom size on demand
-    public function regen_og_custom_callback() {
-        $attachment_id = absint($_POST['attachment_id'] ?? 0);
-        if (!$attachment_id) {
-            wp_send_json_error('Missing attachment ID');
-        }
-
-        $fullsizepath = get_attached_file($attachment_id);
-        if (!$fullsizepath || !file_exists($fullsizepath)) {
-            wp_send_json_error('File not found.');
-        }
-
-        $mime = mime_content_type($fullsizepath);
-        if (!in_array($mime, ['image/jpeg', 'image/png', 'image/webp'])) {
-            wp_send_json_error('Only JPEG, PNG, and WebP are supported.');
-        }
-
-        // Load image editor
-        $editor = wp_get_image_editor($fullsizepath);
-        if (is_wp_error($editor)) {
-            wp_send_json_error('Image editor error: ' . $editor->get_error_message());
-        }
-
-        // Regenerate og_custom
-        $editor->multi_resize([
-            'og_custom' => [1024, 683, true]
-        ]);
-
-        // Update metadata
-        $metadata = wp_generate_attachment_metadata($attachment_id, $fullsizepath);
-        if (is_wp_error($metadata)) {
-            wp_send_json_error('Metadata error: ' . $metadata->get_error_message());
-        }
-
-        wp_update_attachment_metadata($attachment_id, $metadata);
-
-        // Try to retrieve the new image URL
-        if (!empty($metadata['sizes']['og_custom']['file'])) {
-            $upload_dir = wp_upload_dir();
-            $baseurl = trailingslashit($upload_dir['baseurl']);
-            $basedir = trailingslashit($upload_dir['basedir']);
-            $subdir = dirname($metadata['file']);
-
-            $og_file = $metadata['sizes']['og_custom']['file'];
-            $og_path = $basedir . '/' . $subdir . '/' . $og_file;
-            $og_url  = $baseurl . $subdir . '/' . $og_file;
-
-            if (file_exists($og_path)) {
-                wp_send_json_success(['url' => esc_url($og_url)]);
-            }
-        }
-
-        wp_send_json_error('Image too smaller than 1024x863 PX.');
-    }
-
-    // AI-powered title generation
-    public function ai_generate_title_callback() {
-        $api_key = get_option('seoplugin_ai_api_key');
-        if (!$api_key) {
-            wp_send_json_error('API key not configured');
-        }
-
-        $post_id = intval($_POST['post_id']);
-        $post = get_post($post_id);
-        $content = wp_strip_all_tags($post->post_content);
-        $focus_keyword = get_post_meta($post_id, '_seoplugin_focus_keyword', true);
-
-        $prompt = "Generate 3 SEO-optimized titles for this content. Requirements: 30-65 characters, include focus keyword '{$focus_keyword}', engaging and click-worthy. Content: " . substr($content, 0, 1000);
+    public function ajax_ai_generate_title() {
+        check_ajax_referer( 'seoplugin_nonce', 'nonce' );
         
-        $result = $this->call_gemini_api($api_key, $prompt);
-        if ($result) {
-            wp_send_json_success(['titles' => $result]);
-        } else {
-            wp_send_json_error('Failed to generate titles');
+        if ( ! get_option( 'seoplugin_ai_enabled', false ) ) {
+            wp_send_json_error( 'AI Assistant is disabled' );
         }
+        
+        $api_key = get_option( 'seoplugin_gemini_api_key' );
+        if ( ! $api_key ) {
+            wp_send_json_error( 'Google Gemini API key not configured' );
+        }
+        
+        $post_id = intval( $_POST['post_id'] );
+        $post = get_post( $post_id );
+        
+        if ( ! $post ) {
+            wp_send_json_error( 'Post not found' );
+        }
+        
+        $content = wp_strip_all_tags( $post->post_content );
+        $content = wp_trim_words( $content, 100 );
+        
+        $prompt = "Generate 5 SEO-optimized titles for this content. Each title should be 30-65 characters long and engaging:\n\n" . $content;
+        
+        $response = $this->call_gemini_api( $api_key, $prompt );
+        
+        if ( is_wp_error( $response ) ) {
+            wp_send_json_error( $response->get_error_message() );
+        }
+        
+        wp_send_json_success( [ 'titles' => $response ] );
     }
 
-    // AI-powered description generation
-    public function ai_generate_description_callback() {
-        $api_key = get_option('seoplugin_ai_api_key');
-        if (!$api_key) {
-            wp_send_json_error('API key not configured');
-        }
-
-        $post_id = intval($_POST['post_id']);
-        $post = get_post($post_id);
-        $content = wp_strip_all_tags($post->post_content);
-        $focus_keyword = get_post_meta($post_id, '_seoplugin_focus_keyword', true);
-
-        $prompt = "Generate 3 SEO-optimized meta descriptions for this content. Requirements: 120-160 characters, include focus keyword '{$focus_keyword}', compelling and descriptive. Content: " . substr($content, 0, 1000);
+    public function ajax_ai_generate_description() {
+        check_ajax_referer( 'seoplugin_nonce', 'nonce' );
         
-        $result = $this->call_gemini_api($api_key, $prompt);
-        if ($result) {
-            wp_send_json_success(['descriptions' => $result]);
-        } else {
-            wp_send_json_error('Failed to generate descriptions');
+        if ( ! get_option( 'seoplugin_ai_enabled', false ) ) {
+            wp_send_json_error( 'AI Assistant is disabled' );
         }
+        
+        $api_key = get_option( 'seoplugin_gemini_api_key' );
+        if ( ! $api_key ) {
+            wp_send_json_error( 'Google Gemini API key not configured' );
+        }
+        
+        $post_id = intval( $_POST['post_id'] );
+        $post = get_post( $post_id );
+        
+        if ( ! $post ) {
+            wp_send_json_error( 'Post not found' );
+        }
+        
+        $content = wp_strip_all_tags( $post->post_content );
+        $content = wp_trim_words( $content, 150 );
+        
+        $prompt = "Generate 3 SEO-optimized meta descriptions for this content. Each description should be 120-160 characters long and compelling:\n\n" . $content;
+        
+        $response = $this->call_gemini_api( $api_key, $prompt );
+        
+        if ( is_wp_error( $response ) ) {
+            wp_send_json_error( $response->get_error_message() );
+        }
+        
+        wp_send_json_success( [ 'descriptions' => $response ] );
     }
 
-    // AI-powered keyword suggestions
-    public function ai_suggest_keywords_callback() {
-        $api_key = get_option('seoplugin_ai_api_key');
-        if (!$api_key) {
-            wp_send_json_error('API key not configured');
-        }
-
-        $post_id = intval($_POST['post_id']);
-        $post = get_post($post_id);
-        $content = wp_strip_all_tags($post->post_content);
-
-        $prompt = "Suggest 10 relevant SEO keywords for this content. Include primary and long-tail keywords. Format as comma-separated list. Content: " . substr($content, 0, 1000);
+    public function ajax_ai_suggest_keywords() {
+        check_ajax_referer( 'seoplugin_nonce', 'nonce' );
         
-        $result = $this->call_gemini_api($api_key, $prompt);
-        if ($result) {
-            wp_send_json_success(['keywords' => $result]);
-        } else {
-            wp_send_json_error('Failed to generate keywords');
+        if ( ! get_option( 'seoplugin_ai_enabled', false ) ) {
+            wp_send_json_error( 'AI Assistant is disabled' );
         }
+        
+        $api_key = get_option( 'seoplugin_gemini_api_key' );
+        if ( ! $api_key ) {
+            wp_send_json_error( 'Google Gemini API key not configured' );
+        }
+        
+        $post_id = intval( $_POST['post_id'] );
+        $post = get_post( $post_id );
+        
+        if ( ! $post ) {
+            wp_send_json_error( 'Post not found' );
+        }
+        
+        $content = wp_strip_all_tags( $post->post_content );
+        $content = wp_trim_words( $content, 200 );
+        
+        $prompt = "Analyze this content and suggest 10 relevant SEO keywords and phrases. Return only the keywords separated by commas:\n\n" . $content;
+        
+        $response = $this->call_gemini_api( $api_key, $prompt );
+        
+        if ( is_wp_error( $response ) ) {
+            wp_send_json_error( $response->get_error_message() );
+        }
+        
+        wp_send_json_success( [ 'keywords' => $response ] );
     }
 
-    // AI-powered content analysis
-    public function ai_analyze_content_callback() {
-        $api_key = get_option('seoplugin_ai_api_key');
-        if (!$api_key) {
-            wp_send_json_error('API key not configured');
-        }
-
-        $post_id = intval($_POST['post_id']);
-        $post = get_post($post_id);
-        $content = wp_strip_all_tags($post->post_content);
-        $title = get_post_meta($post_id, '_seoplugin_meta_title', true) ?: $post->post_title;
-        $description = get_post_meta($post_id, '_seoplugin_meta_description', true);
-
-        $prompt = "Analyze this content for SEO optimization. Provide specific recommendations for: 1) Title optimization, 2) Meta description improvement, 3) Content structure, 4) Keyword usage, 5) Readability. Be specific and actionable. Content: " . substr($content, 0, 1500) . " | Title: {$title} | Description: {$description}";
+    public function ajax_ai_analyze_content() {
+        check_ajax_referer( 'seoplugin_nonce', 'nonce' );
         
-        $result = $this->call_gemini_api($api_key, $prompt);
-        if ($result) {
-            wp_send_json_success(['analysis' => $result]);
-        } else {
-            wp_send_json_error('Failed to analyze content');
+        if ( ! get_option( 'seoplugin_ai_enabled', false ) ) {
+            wp_send_json_error( 'AI Assistant is disabled' );
         }
+        
+        $api_key = get_option( 'seoplugin_gemini_api_key' );
+        if ( ! $api_key ) {
+            wp_send_json_error( 'Google Gemini API key not configured' );
+        }
+        
+        $post_id = intval( $_POST['post_id'] );
+        $post = get_post( $post_id );
+        
+        if ( ! $post ) {
+            wp_send_json_error( 'Post not found' );
+        }
+        
+        $content = wp_strip_all_tags( $post->post_content );
+        $title = get_the_title( $post_id );
+        
+        $prompt = "Analyze this content for SEO and provide specific recommendations for improvement. Focus on content structure, keyword usage, readability, and SEO best practices:\n\nTitle: " . $title . "\n\nContent: " . wp_trim_words( $content, 300 );
+        
+        $response = $this->call_gemini_api( $api_key, $prompt );
+        
+        if ( is_wp_error( $response ) ) {
+            wp_send_json_error( $response->get_error_message() );
+        }
+        
+        wp_send_json_success( [ 'analysis' => $response ] );
     }
 
-    // Call Gemini API
-    private function call_gemini_api($api_key, $prompt) {
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" . $api_key;
+    private function call_gemini_api( $api_key, $prompt ) {
+        $url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' . $api_key;
         
-        $data = [
-            "contents" => [[
-                "parts" => [[ "text" => $prompt ]]
-            ]]
+        $body = [
+            'contents' => [
+                [
+                    'parts' => [
+                        [ 'text' => $prompt ]
+                    ]
+                ]
+            ]
         ];
-
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-
-        $response = curl_exec($ch);
-        if ($response === false) {
-            curl_close($ch);
-            return false;
-        }
-        curl_close($ch);
-
-        $result = json_decode($response, true);
-        if (isset($result["candidates"][0]["content"]["parts"][0]["text"])) {
-            return $result["candidates"][0]["content"]["parts"][0]["text"];
-        }
         
-        return false;
-    }
-    
-    // Initialize term meta support
-    public function init_term_meta() {
-        // Register term meta fields
-        register_term_meta( 'category', '_seoplugin_meta_title', [
-            'type' => 'string',
-            'description' => 'SEO Title for category',
-            'single' => true,
-            'sanitize_callback' => 'sanitize_text_field',
+        $response = wp_remote_post( $url, [
+            'headers' => [
+                'Content-Type' => 'application/json',
+            ],
+            'body' => wp_json_encode( $body ),
+            'timeout' => 30
         ] );
         
-        register_term_meta( 'category', '_seoplugin_meta_description', [
-            'type' => 'string',
-            'description' => 'SEO Description for category',
-            'single' => true,
-            'sanitize_callback' => 'sanitize_textarea_field',
-        ] );
-        
-        register_term_meta( 'category', '_seoplugin_og_image_id', [
-            'type' => 'integer',
-            'description' => 'OG Image ID for category',
-            'single' => true,
-            'sanitize_callback' => 'absint',
-        ] );
-        
-        register_term_meta( 'category', '_seoplugin_focus_keyword', [
-            'type' => 'string',
-            'description' => 'Focus keyword for category',
-            'single' => true,
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-        
-        register_term_meta( 'category', '_seoplugin_robots_meta', [
-            'type' => 'string',
-            'description' => 'Robots meta for category',
-            'single' => true,
-            'sanitize_callback' => 'sanitize_text_field',
-        ] );
-        
-        register_term_meta( 'category', '_seoplugin_canonical_url', [
-            'type' => 'string',
-            'description' => 'Canonical URL for category',
-            'single' => true,
-            'sanitize_callback' => 'esc_url_raw',
-        ] );
-        
-        // Register for tags and custom taxonomies
-        $taxonomies = get_taxonomies( [ 'public' => true ] );
-        foreach ( $taxonomies as $taxonomy ) {
-            if ( $taxonomy === 'category' ) continue; // Already registered above
-            
-            register_term_meta( $taxonomy, '_seoplugin_meta_title', [
-                'type' => 'string',
-                'description' => 'SEO Title',
-                'single' => true,
-                'sanitize_callback' => 'sanitize_text_field',
-            ] );
-            
-            register_term_meta( $taxonomy, '_seoplugin_meta_description', [
-                'type' => 'string',
-                'description' => 'SEO Description',
-                'single' => true,
-                'sanitize_callback' => 'sanitize_textarea_field',
-            ] );
-            
-            register_term_meta( $taxonomy, '_seoplugin_og_image_id', [
-                'type' => 'integer',
-                'description' => 'OG Image ID',
-                'single' => true,
-                'sanitize_callback' => 'absint',
-            ] );
-            
-            register_term_meta( $taxonomy, '_seoplugin_focus_keyword', [
-                'type' => 'string',
-                'description' => 'Focus keyword',
-                'single' => true,
-                'sanitize_callback' => 'sanitize_text_field',
-            ] );
-            
-            register_term_meta( $taxonomy, '_seoplugin_robots_meta', [
-                'type' => 'string',
-                'description' => 'Robots meta',
-                'single' => true,
-                'sanitize_callback' => 'sanitize_text_field',
-            ] );
-            
-            register_term_meta( $taxonomy, '_seoplugin_canonical_url', [
-                'type' => 'string',
-                'description' => 'Canonical URL',
-                'single' => true,
-                'sanitize_callback' => 'esc_url_raw',
-            ] );
-        }
-    }
-    
-    // Add category meta fields (for new categories)
-    public function add_category_meta_fields( $taxonomy ) {
-        ?>
-        <div class="form-field term-seo-wrap">
-            <label for="seoplugin_meta_title"><?php _e( 'SEO Title', 'seoplugin' ); ?></label>
-            <input type="text" id="seoplugin_meta_title" name="seoplugin_meta_title" value="" size="40" maxlength="65" class="frmtxt" />
-            <p class="description"><?php _e( 'The SEO title for this term. Leave blank to use the term name.', 'seoplugin' ); ?> <span id="seoTitleCharCount">0</span>/65</p>
-        </div>
-        
-        <div class="form-field term-seo-wrap">
-            <label for="seoplugin_meta_description"><?php _e( 'Meta Description', 'seoplugin' ); ?></label>
-            <textarea id="seoplugin_meta_description" name="seoplugin_meta_description" rows="3" cols="50" maxlength="160" class="frmtxt"></textarea>
-            <p class="description"><?php _e( 'The meta description for this term.', 'seoplugin' ); ?> <span id="seoDescriptionCharCount">0</span>/160</p>
-        </div>
-        
-        <div class="form-field term-seo-wrap">
-            <label for="seoplugin_focus_keyword"><?php _e( 'Focus Keyword', 'seoplugin' ); ?></label>
-            <input type="text" id="seoplugin_focus_keyword" name="seoplugin_focus_keyword" value="" size="40" class="frmtxt" />
-            <p class="description"><?php _e( 'The main keyword you want this term to rank for.', 'seoplugin' ); ?></p>
-        </div>
-        
-        <div class="form-field term-seo-wrap">
-            <label for="seoplugin_og_image_id"><?php _e( 'Open Graph Image', 'seoplugin' ); ?></label>
-            <input type="hidden" id="seoplugin_og_image_id" name="seoplugin_og_image_id" value="" />
-            <div id="seoplugin_og_image_preview"></div>
-            <button type="button" id="seoplugin_og_image_button" class="button"><?php _e( 'Select OG Image', 'seoplugin' ); ?></button>
-            <p class="description"><?php _e( 'Image that will be used when this term is shared on social media.', 'seoplugin' ); ?></p>
-        </div>
-        
-        <div class="form-field term-seo-wrap">
-            <label for="seoplugin_robots_meta"><?php _e( 'Robots Meta', 'seoplugin' ); ?></label>
-            <select id="seoplugin_robots_meta" name="seoplugin_robots_meta" class="frmtxt">
-                <option value=""><?php _e( 'Default (index, follow)', 'seoplugin' ); ?></option>
-                <option value="noindex,follow"><?php _e( 'No Index, Follow', 'seoplugin' ); ?></option>
-                <option value="index,nofollow"><?php _e( 'Index, No Follow', 'seoplugin' ); ?></option>
-                <option value="noindex,nofollow"><?php _e( 'No Index, No Follow', 'seoplugin' ); ?></option>
-            </select>
-            <p class="description"><?php _e( 'How search engines should treat this term.', 'seoplugin' ); ?></p>
-        </div>
-        
-        <div class="form-field term-seo-wrap">
-            <label for="seoplugin_canonical_url"><?php _e( 'Canonical URL', 'seoplugin' ); ?></label>
-            <input type="url" id="seoplugin_canonical_url" name="seoplugin_canonical_url" value="" size="40" class="frmtxt" />
-            <p class="description"><?php _e( 'The canonical URL for this term. Leave blank to use the default URL.', 'seoplugin' ); ?></p>
-        </div>
-        
-        <script>
-        jQuery(document).ready(function($) {
-            initCharCounter('seoplugin_meta_title', 65, 'seoTitleCharCount');
-            initCharCounter('seoplugin_meta_description', 160, 'seoDescriptionCharCount');
-            
-            // OG Image selector
-            $('#seoplugin_og_image_button').on('click', function(e) {
-                e.preventDefault();
-                
-                const image_frame = wp.media({
-                    title: 'Select OG Image',
-                    library: { type: 'image' },
-                    button: { text: 'Use This Image' },
-                    multiple: false
-                });
-                
-                image_frame.on('select', function() {
-                    const attachment = image_frame.state().get('selection').first().toJSON();
-                    $('#seoplugin_og_image_id').val(attachment.id);
-                    $('#seoplugin_og_image_preview').html(
-                        '<img src="' + attachment.url + '" style="max-width:200px; height:auto; margin-top:10px;" />'
-                    );
-                });
-                
-                image_frame.open();
-            });
-        });
-        </script>
-        <?php
-    }
-    
-    // Edit category meta fields (for existing categories)
-    public function edit_category_meta_fields( $term, $taxonomy = '' ) {
-        $term_id = $term->term_id;
-        $meta_title = get_term_meta( $term_id, '_seoplugin_meta_title', true );
-        $meta_description = get_term_meta( $term_id, '_seoplugin_meta_description', true );
-        $focus_keyword = get_term_meta( $term_id, '_seoplugin_focus_keyword', true );
-        $og_image_id = get_term_meta( $term_id, '_seoplugin_og_image_id', true );
-        $robots_meta = get_term_meta( $term_id, '_seoplugin_robots_meta', true );
-        $canonical_url = get_term_meta( $term_id, '_seoplugin_canonical_url', true );
-        
-        // Get OG image preview
-        $og_image_preview = '';
-        if ( $og_image_id ) {
-            $og_image_url = wp_get_attachment_image_url( $og_image_id, 'medium' );
-            if ( $og_image_url ) {
-                $og_image_preview = '<img src="' . esc_url( $og_image_url ) . '" style="max-width:200px; height:auto; margin-top:10px;" />';
-            }
-        }
-        ?>
-        <tr class="form-field term-seo-wrap">
-            <th scope="row">
-                <label for="seoplugin_meta_title"><?php _e( 'SEO Title', 'seoplugin' ); ?></label>
-            </th>
-            <td>
-                <input type="text" id="seoplugin_meta_title" name="seoplugin_meta_title" value="<?php echo esc_attr( $meta_title ); ?>" size="40" maxlength="65" class="frmtxt" />
-                <p class="description"><?php _e( 'The SEO title for this term. Leave blank to use the term name.', 'seoplugin' ); ?> <span id="seoTitleCharCount"><?php echo strlen( $meta_title ); ?></span>/65</p>
-            </td>
-        </tr>
-        
-        <tr class="form-field term-seo-wrap">
-            <th scope="row">
-                <label for="seoplugin_meta_description"><?php _e( 'Meta Description', 'seoplugin' ); ?></label>
-            </th>
-            <td>
-                <textarea id="seoplugin_meta_description" name="seoplugin_meta_description" rows="3" cols="50" maxlength="160" class="frmtxt"><?php echo esc_textarea( $meta_description ); ?></textarea>
-                <p class="description"><?php _e( 'The meta description for this term.', 'seoplugin' ); ?> <span id="seoDescriptionCharCount"><?php echo strlen( $meta_description ); ?></span>/160</p>
-            </td>
-        </tr>
-        
-        <tr class="form-field term-seo-wrap">
-            <th scope="row">
-                <label for="seoplugin_focus_keyword"><?php _e( 'Focus Keyword', 'seoplugin' ); ?></label>
-            </th>
-            <td>
-                <input type="text" id="seoplugin_focus_keyword" name="seoplugin_focus_keyword" value="<?php echo esc_attr( $focus_keyword ); ?>" size="40" class="frmtxt" />
-                <p class="description"><?php _e( 'The main keyword you want this term to rank for.', 'seoplugin' ); ?></p>
-            </td>
-        </tr>
-        
-        <tr class="form-field term-seo-wrap">
-            <th scope="row">
-                <label for="seoplugin_og_image_id"><?php _e( 'Open Graph Image', 'seoplugin' ); ?></label>
-            </th>
-            <td>
-                <input type="hidden" id="seoplugin_og_image_id" name="seoplugin_og_image_id" value="<?php echo esc_attr( $og_image_id ); ?>" />
-                <div id="seoplugin_og_image_preview"><?php echo $og_image_preview; ?></div>
-                <button type="button" id="seoplugin_og_image_button" class="button"><?php _e( 'Select OG Image', 'seoplugin' ); ?></button>
-                <?php if ( $og_image_id ): ?>
-                    <button type="button" id="seoplugin_remove_og_image" class="button"><?php _e( 'Remove Image', 'seoplugin' ); ?></button>
-                <?php endif; ?>
-                <p class="description"><?php _e( 'Image that will be used when this term is shared on social media.', 'seoplugin' ); ?></p>
-            </td>
-        </tr>
-        
-        <tr class="form-field term-seo-wrap">
-            <th scope="row">
-                <label for="seoplugin_robots_meta"><?php _e( 'Robots Meta', 'seoplugin' ); ?></label>
-            </th>
-            <td>
-                <select id="seoplugin_robots_meta" name="seoplugin_robots_meta" class="frmtxt">
-                    <option value="" <?php selected( $robots_meta, '' ); ?>><?php _e( 'Default (index, follow)', 'seoplugin' ); ?></option>
-                    <option value="noindex,follow" <?php selected( $robots_meta, 'noindex,follow' ); ?>><?php _e( 'No Index, Follow', 'seoplugin' ); ?></option>
-                    <option value="index,nofollow" <?php selected( $robots_meta, 'index,nofollow' ); ?>><?php _e( 'Index, No Follow', 'seoplugin' ); ?></option>
-                    <option value="noindex,nofollow" <?php selected( $robots_meta, 'noindex,nofollow' ); ?>><?php _e( 'No Index, No Follow', 'seoplugin' ); ?></option>
-                </select>
-                <p class="description"><?php _e( 'How search engines should treat this term.', 'seoplugin' ); ?></p>
-            </td>
-        </tr>
-        
-        <tr class="form-field term-seo-wrap">
-            <th scope="row">
-                <label for="seoplugin_canonical_url"><?php _e( 'Canonical URL', 'seoplugin' ); ?></label>
-            </th>
-            <td>
-                <input type="url" id="seoplugin_canonical_url" name="seoplugin_canonical_url" value="<?php echo esc_attr( $canonical_url ); ?>" size="40" class="frmtxt" />
-                <p class="description"><?php _e( 'The canonical URL for this term. Leave blank to use the default URL.', 'seoplugin' ); ?></p>
-            </td>
-        </tr>
-        
-        <!-- SEO Preview for Categories -->
-        <tr class="form-field term-seo-wrap">
-            <th scope="row"><?php _e( 'SEO Preview', 'seoplugin' ); ?></th>
-            <td>
-                <div class="google-view">
-                    <div class="google-wrap-content">
-                        <div class="header-logo">
-                            <div class="divddercolunm">
-                                <div class="google-logo">
-                                    <img class="logo" src="<?php echo esc_url( get_site_icon_url( 32 ) ?: 'https://www.google.com/favicon.ico' ); ?>" alt="Site Icon">
-                                </div>
-                                <div class="google-site">
-                                    <div class="google-site-domain"><?php echo esc_html( parse_url( home_url(), PHP_URL_HOST ) ); ?></div>
-                                    <div class="site-down-color">[<?php echo esc_html( $term->name ); ?>]</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="wrp-google-title">
-                            <h3 class="google-title">
-                                <a href="#" class="google-title3" id="preview-title">
-                                    <?php echo esc_html( $meta_title ?: $term->name ); ?>
-                                </a>
-                            </h3>
-                        </div>
-                        <div class="wrp-google-decription" id="preview-description">
-                            <?php echo esc_html( $meta_description ?: ( $term->description ?: 'Browse our ' . $term->name . ' content.' ) ); ?>
-                        </div>
-                    </div>
-                </div>
-            </td>
-        </tr>
-        
-        <script>
-        jQuery(document).ready(function($) {
-            initCharCounter('seoplugin_meta_title', 65, 'seoTitleCharCount');
-            initCharCounter('seoplugin_meta_description', 160, 'seoDescriptionCharCount');
-            
-            // Update preview when fields change
-            $('#seoplugin_meta_title').on('input', function() {
-                const title = $(this).val() || '<?php echo esc_js( $term->name ); ?>';
-                $('#preview-title').text(title);
-            });
-            
-            $('#seoplugin_meta_description').on('input', function() {
-                const desc = $(this).val() || '<?php echo esc_js( $term->description ?: 'Browse our ' . $term->name . ' content.' ); ?>';
-                $('#preview-description').text(desc);
-            });
-            
-            // OG Image selector
-            $('#seoplugin_og_image_button').on('click', function(e) {
-                e.preventDefault();
-                
-                const image_frame = wp.media({
-                    title: 'Select OG Image',
-                    library: { type: 'image' },
-                    button: { text: 'Use This Image' },
-                    multiple: false
-                });
-                
-                image_frame.on('select', function() {
-                    const attachment = image_frame.state().get('selection').first().toJSON();
-                    $('#seoplugin_og_image_id').val(attachment.id);
-                    $('#seoplugin_og_image_preview').html(
-                        '<img src="' + attachment.url + '" style="max-width:200px; height:auto; margin-top:10px;" />'
-                    );
-                    
-                    // Add remove button if not exists
-                    if (!$('#seoplugin_remove_og_image').length) {
-                        $('#seoplugin_og_image_button').after('<button type="button" id="seoplugin_remove_og_image" class="button" style="margin-left:10px;">Remove Image</button>');
-                    }
-                });
-                
-                image_frame.open();
-            });
-            
-            // Remove OG Image
-            $(document).on('click', '#seoplugin_remove_og_image', function(e) {
-                e.preventDefault();
-                $('#seoplugin_og_image_id').val('');
-                $('#seoplugin_og_image_preview').html('');
-                $(this).remove();
-            });
-        });
-        </script>
-        <?php
-    }
-    
-    // Save category meta data
-    public function save_category_meta( $term_id ) {
-        if ( ! current_user_can( 'manage_categories' ) ) {
-            return;
+        if ( is_wp_error( $response ) ) {
+            return $response;
         }
         
-        // Save meta title
-        if ( isset( $_POST['seoplugin_meta_title'] ) ) {
-            update_term_meta( $term_id, '_seoplugin_meta_title', sanitize_text_field( $_POST['seoplugin_meta_title'] ) );
+        $body = wp_remote_retrieve_body( $response );
+        $data = json_decode( $body, true );
+        
+        if ( ! isset( $data['candidates'][0]['content']['parts'][0]['text'] ) ) {
+            return new WP_Error( 'api_error', 'Invalid API response' );
         }
         
-        // Save meta description
-        if ( isset( $_POST['seoplugin_meta_description'] ) ) {
-            update_term_meta( $term_id, '_seoplugin_meta_description', sanitize_textarea_field( $_POST['seoplugin_meta_description'] ) );
-        }
-        
-        // Save focus keyword
-        if ( isset( $_POST['seoplugin_focus_keyword'] ) ) {
-            update_term_meta( $term_id, '_seoplugin_focus_keyword', sanitize_text_field( $_POST['seoplugin_focus_keyword'] ) );
-        }
-        
-        // Save OG image
-        if ( isset( $_POST['seoplugin_og_image_id'] ) ) {
-            update_term_meta( $term_id, '_seoplugin_og_image_id', absint( $_POST['seoplugin_og_image_id'] ) );
-        }
-        
-        // Save robots meta
-        if ( isset( $_POST['seoplugin_robots_meta'] ) ) {
-            update_term_meta( $term_id, '_seoplugin_robots_meta', sanitize_text_field( $_POST['seoplugin_robots_meta'] ) );
-        }
-        
-        // Save canonical URL
-        if ( isset( $_POST['seoplugin_canonical_url'] ) ) {
-            update_term_meta( $term_id, '_seoplugin_canonical_url', esc_url_raw( $_POST['seoplugin_canonical_url'] ) );
-        }
+        return $data['candidates'][0]['content']['parts'][0]['text'];
     }
 }
 
