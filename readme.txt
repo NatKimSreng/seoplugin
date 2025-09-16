@@ -1,5 +1,5 @@
 === SEOPlugin ===
-Contributors: yourname
+Contributors: kimsreng
 Tags: seo, meta tags, sitemap, optimization
 Requires at least: 5.0
 Tested up to: 6.6
